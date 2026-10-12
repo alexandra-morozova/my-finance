@@ -1,0 +1,26 @@
+---
+description: Pragmatic DDD — domain vs Mongoose vs repository
+globs: backend/src/**/*.ts
+alwaysApply: true
+---
+
+# Domain vs persistence
+
+Follow `backend/AGENTS.md`. When adding data:
+
+1. Domain type in `backend/src/domain/` — `id: string`, no mongoose, no password.
+2. Schema in `backend/src/models/` — `InferSchemaType` + `HydratedDocument`, not `extends Document`.
+3. Repository in `backend/src/repositories/` — maps `_id` → `id`; only file that imports `*Model`.
+
+```ts
+// ❌ BAD — route/service talks to mongoose
+const doc = await UserModel.findOne({ email });
+res.json(doc);
+
+// ✅ GOOD
+const user = await findUserByEmail(email);
+if (!user) throw new NotFoundException("User not found");
+res.json(user);
+```
+
+Do not add a generic `Repository<T>`. Do not use `schema.pre("save")` to hash passwords. Hash in `services/user.service.ts` (`registerUser`, `setUserPassword`), then store via `createUser({ passwordHash })`. Login may use `findUserCredentialsByEmail` + `comparePassword`.
