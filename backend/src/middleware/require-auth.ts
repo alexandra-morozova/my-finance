@@ -1,17 +1,23 @@
 import type { Request, RequestHandler } from "express";
 import { UnauthorizedException } from "../shared/errors/app-error.ts";
+import { readAccessTokenCookie } from "../shared/http/cookies.ts";
 import { verifyAccessToken } from "../shared/utils/jwt.ts";
 
 export type AuthedRequest = Request & { userId: string };
 
-export const requireAuth: RequestHandler = async (req, _res, next) => {
+function readAccessToken(req: Request): string | undefined {
   const header = req.headers.authorization;
-  if (!header?.startsWith("Bearer ")) {
-    next(new UnauthorizedException());
-    return;
+  if (header?.startsWith("Bearer ")) {
+    const token = header.slice("Bearer ".length).trim();
+    if (token) {
+      return token;
+    }
   }
+  return readAccessTokenCookie(req);
+}
 
-  const token = header.slice("Bearer ".length).trim();
+export const requireAuth: RequestHandler = async (req, _res, next) => {
+  const token = readAccessToken(req);
   if (!token) {
     next(new UnauthorizedException());
     return;

@@ -32,3 +32,39 @@ Changes
 - Keep the same windows and keys (IP + email).
 - Do not log emails or tokens from the store.
 - Fail closed or fail open should be an explicit decision when the store is down.
+
+---
+
+Refresh tokens
+
+Current: login issues only an access token (`signAccessToken` / `JWT_SECRET` /
+`JWT_EXPIRES_IN`). `JWT_REFRESH_SECRET` and `JWT_REFRESH_EXPIRES_IN` are already
+in env but unused. When the access token expires the user must log in again.
+
+Changes
+- Issue a refresh token at login (separate secret and longer TTL).
+- Add `POST /auth/refresh` to mint a new access token from a valid refresh token.
+- Store refresh tokens (or their hashes) so they can be revoked on logout and
+  when a user is disabled.
+- Rotate refresh tokens on use; reuse of an old token should revoke the family.
+- Do not put refresh tokens in localStorage if the client can use httpOnly
+  cookies; do not log tokens.
+- Keep access tokens short-lived; `requireAuth` continues to verify only the
+  access token.
+
+---
+
+HSTS preload
+
+Current: production HTTPS responses send
+`Strict-Transport-Security: max-age=15552000; includeSubDomains` (180 days).
+Browsers remember HTTPS-only after they have already visited. `preload` is not
+set, and the domain is not on Chrome’s HSTS preload list.
+
+Changes (only when the apex domain is fully HTTPS and you will not need HTTP
+on any subdomain)
+- Raise `max-age` to at least `31536000` (1 year).
+- Add `preload` to the HSTS header in `require-https.ts`.
+- Submit the registrable domain at https://hstspreload.org/.
+- Know that removal is slow (Chrome release cycle). Do not preload staging
+  or a host you might still serve over HTTP.
