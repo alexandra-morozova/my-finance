@@ -1,4 +1,4 @@
-import { HTTP_STATUS, type HttpStatus } from "../config/http.config.ts";
+import { HTTP_STATUS, type HttpStatus } from "../utils/http-status.ts";
 
 export class AppError extends Error {
   readonly status: HttpStatus;

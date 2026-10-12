@@ -1,0 +1,22 @@
+---
+description: Application structure and layer boundaries
+alwaysApply: true
+---
+
+# Application structure and layer boundaries
+
+- Organize code by feature under src/modules/.
+- Each feature may contain routes, controllers, services,
+  repositories, validation, and types as needed.
+- Routes define HTTP endpoints and middleware.
+- Controllers handle HTTP input and output only.
+- Services contain business operations and orchestration.
+- Repositories contain database queries and persistence logic.
+- Controllers must not access Prisma or SQL directly.
+- Services must not depend on Express Request or Response.
+- Repositories must not depend on controllers or HTTP concerns.
+- Keep configuration and shared middleware outside feature modules.
+- Do not introduce DDD, CQRS, event sourcing, or extra
+  architectural layers unless explicitly requested.
+- Avoid circular dependencies between feature modules.
+- Do not create abstractions or files without a practical need.

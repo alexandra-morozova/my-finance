@@ -5,8 +5,8 @@
   "type": "module",
   "packageManager": "pnpm@12.11.2",
   "scripts": {
-    "dev": "node --watch --env-file=.env --env-file-if-exists=.env.local src/index.ts",
-    "start": "node --env-file-if-exists=.env src/index.ts",
+    "dev": "node --watch --env-file=.env --env-file-if-exists=.env.local src/server.ts",
+    "start": "node --env-file-if-exists=.env src/server.ts",
     "typecheck": "tsc --noEmit",
     "postinstall": "prisma generate",
     "db:generate": "prisma generate",

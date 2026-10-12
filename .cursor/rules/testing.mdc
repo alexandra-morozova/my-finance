@@ -1,0 +1,15 @@
+---
+description: Testing conventions
+alwaysApply: false
+globs: "**/*.test.ts,**/*.spec.ts"
+---
+
+# Testing conventions
+
+- Test service business logic independently of HTTP handlers.
+- Test controllers for HTTP behavior where appropriate.
+- Test repository queries and mappings with integration tests.
+- Add regression tests for bug fixes.
+- Keep tests deterministic and avoid real external services.
+- Never remove tests simply to make a change pass.
+- Run the relevant tests and report the actual outcome.

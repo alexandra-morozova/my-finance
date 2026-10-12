@@ -1,12 +1,12 @@
-import { HTTP_STATUS } from "../config/http.config.ts";
-import type { User } from "../domain/user.ts";
+import { AppError, NotFoundException } from "../../shared/errors/app-error.ts";
+import { hashPassword } from "../../shared/utils/bcrypt.ts";
+import { HTTP_STATUS } from "../../shared/utils/http-status.ts";
 import {
   createUser,
   findUserByEmail,
   updateUserPassword,
-} from "../repositories/user.repository.ts";
-import { AppError, NotFoundException } from "../utils/app-error.ts";
-import { hashPassword } from "../utils/bcrypt.ts";
+} from "./users.repository.ts";
+import type { User } from "./users.types.ts";
 
 export async function registerUser(input: {
   email: string;

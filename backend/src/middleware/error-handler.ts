@@ -1,11 +1,8 @@
-import type { ErrorRequestHandler, RequestHandler } from "express";
-import { HTTP_STATUS } from "../config/http.config.ts";
-import { env } from "../config/env.config.ts";
-import { AppError, NotFoundException } from "../utils/app-error.ts";
-
-export const notFound: RequestHandler = (_req, _res, next) => {
-  next(new NotFoundException());
-};
+import type { ErrorRequestHandler } from "express";
+import { AppError } from "../shared/errors/app-error.ts";
+import { logger } from "../shared/logger/logger.ts";
+import { env } from "../shared/env.ts";
+import { HTTP_STATUS } from "../shared/utils/http-status.ts";
 
 export const errorHandler: ErrorRequestHandler = (err, _req, res, _next) => {
   const isAppError = err instanceof AppError;
@@ -16,7 +13,7 @@ export const errorHandler: ErrorRequestHandler = (err, _req, res, _next) => {
       : HTTP_STATUS.INTERNAL_SERVER_ERROR;
 
   if (!isAppError) {
-    console.error(err);
+    logger.error("Unhandled error", err);
   }
 
   const isProd = env.NODE_ENV === "production";

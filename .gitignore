@@ -22,7 +22,7 @@ coverage/
 *.tsbuildinfo
 
 # Prisma generated client
-backend/src/generated/
+backend/generated/
 
 # OS
 .DS_Store

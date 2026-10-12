@@ -1,0 +1,25 @@
+---
+description: Database access and repository implementation conventions
+globs: backend/src/modules/**/*.repository.ts,backend/src/database/**/*.ts
+alwaysApply: false
+---
+
+# Persistence conventions
+
+- Keep database access inside infrastructure adapters.
+- Implement existing repository interfaces rather than introducing
+  parallel ways to access the same data.
+- Map database records to domain objects explicitly when needed.
+- Never expose ORM model types as domain or application contracts.
+- Do not put business rules in repository implementations.
+- Use database transactions when a use case requires multiple
+  writes to succeed or fail atomically.
+- Keep schema changes and migrations consistent with the
+  project's existing database workflow.
+- Do not silently change persisted data formats or API contracts.
+- Treat external input as untrusted, even when it reaches
+  the persistence layer through an application use case.
+- Add tests for important mapping, persistence, and transaction
+  behavior where practical.
+- Avoid generic repository frameworks unless there is a
+  demonstrated need for them.

@@ -1,0 +1,15 @@
+---
+description: Express API conventions
+globs: backend/src/modules/**/*.ts,backend/src/middleware/**/*.ts
+alwaysApply: false
+---
+
+# Express API conventions
+
+- Validate untrusted request input with the project's validation library.
+- Keep HTTP status codes and response formats consistent.
+- Use centralized error handling.
+- Never expose internal errors, stack traces, or secrets to clients.
+- Do not trust client-supplied prices, permissions, or user identity.
+- Use authentication and authorization middleware where required.
+- Follow the project's existing Express version conventions.

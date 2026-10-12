@@ -1,5 +1,5 @@
-import type { NewUser, User } from "../domain/user.ts";
-import { prisma } from "../config/db.config.ts";
+import { prisma } from "../../database/prisma.ts";
+import type { NewUser, User } from "./users.types.ts";
 
 const userSelect = {
   id: true,

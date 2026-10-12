@@ -1,0 +1,25 @@
+---
+description: Express routes, controllers, validation, and HTTP errors
+globs: backend/src/modules/**/*.ts,backend/src/app.ts
+alwaysApply: false
+---
+
+# Express HTTP conventions
+
+- Keep routes thin and controllers focused on HTTP translation.
+- Validate untrusted request input at the HTTP boundary using
+  the project's existing validation library.
+- Never trust client-supplied identity, prices, permissions,
+  totals, or other values that must come from trusted sources.
+- Do not pass Express Request or Response objects into use cases.
+- Use DTOs or explicit input types for application calls.
+- Keep authentication, authorization, and request validation
+  in appropriate middleware or explicit application policies.
+- Use centralized error handling and map known application
+  and domain errors to appropriate HTTP status codes.
+- Never return stack traces, secrets, or internal database errors
+  to clients.
+- Follow the project's installed Express version's async error
+  handling conventions.
+- Keep response shapes and status codes consistent with the
+  existing API.
