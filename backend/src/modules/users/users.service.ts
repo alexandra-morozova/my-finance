@@ -1,11 +1,13 @@
-import { NotFoundException } from "../../shared/errors/app-error.ts";
+import { NotFoundException, UnauthorizedException } from "../../shared/errors/app-error.ts";
 import { hashPassword } from "../../shared/utils/bcrypt.ts";
 import { EmailTakenError } from "./users.errors.ts";
 import {
   createUser,
   findUserByEmail,
+  findUserById,
   updateUserPassword,
 } from "./users.repository.ts";
+import type { User } from "./users.types.ts";
 
 export async function registerUser(input: {
   email: string;
@@ -32,6 +34,14 @@ export async function registerUser(input: {
     }
     throw err;
   }
+}
+
+export async function getCurrentUser(userId: string): Promise<User> {
+  const user = await findUserById(userId);
+  if (!user) {
+    throw new UnauthorizedException();
+  }
+  return user;
 }
 
 export async function setUserPassword(userId: string, password: string): Promise<void> {
