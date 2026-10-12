@@ -1,4 +1,6 @@
+import { Prisma } from "../../../generated/prisma/client.ts";
 import { prisma } from "../../database/prisma.ts";
+import { EmailTakenError } from "./users.errors.ts";
 import type { NewUser, User } from "./users.types.ts";
 
 const userSelect = {
@@ -10,14 +12,21 @@ const userSelect = {
 } as const;
 
 export async function createUser(input: NewUser): Promise<User> {
-  return prisma.user.create({
-    data: {
-      email: input.email.toLowerCase(),
-      passwordHash: input.passwordHash,
-      name: input.name,
-    },
-    select: userSelect,
-  });
+  try {
+    return await prisma.user.create({
+      data: {
+        email: input.email.toLowerCase(),
+        passwordHash: input.passwordHash,
+        name: input.name,
+      },
+      select: userSelect,
+    });
+  } catch (err) {
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
+      throw new EmailTakenError();
+    }
+    throw err;
+  }
 }
 
 export async function findUserById(id: string): Promise<User | null> {

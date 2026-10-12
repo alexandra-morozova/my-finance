@@ -1,29 +1,37 @@
-import { AppError, NotFoundException } from "../../shared/errors/app-error.ts";
+import { NotFoundException } from "../../shared/errors/app-error.ts";
 import { hashPassword } from "../../shared/utils/bcrypt.ts";
-import { HTTP_STATUS } from "../../shared/utils/http-status.ts";
+import { EmailTakenError } from "./users.errors.ts";
 import {
   createUser,
   findUserByEmail,
   updateUserPassword,
 } from "./users.repository.ts";
-import type { User } from "./users.types.ts";
 
 export async function registerUser(input: {
   email: string;
   password: string;
   name: string;
-}): Promise<User> {
-  const existing = await findUserByEmail(input.email);
+}): Promise<void> {
+  const [passwordHash, existing] = await Promise.all([
+    hashPassword(input.password),
+    findUserByEmail(input.email),
+  ]);
   if (existing) {
-    throw new AppError(HTTP_STATUS.BAD_REQUEST, "Email already registered");
+    return;
   }
 
-  const passwordHash = await hashPassword(input.password);
-  return createUser({
-    email: input.email,
-    passwordHash,
-    name: input.name,
-  });
+  try {
+    await createUser({
+      email: input.email,
+      passwordHash,
+      name: input.name,
+    });
+  } catch (err) {
+    if (err instanceof EmailTakenError) {
+      return;
+    }
+    throw err;
+  }
 }
 
 export async function setUserPassword(userId: string, password: string): Promise<void> {

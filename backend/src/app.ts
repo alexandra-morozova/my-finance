@@ -2,6 +2,7 @@ import cors from "cors";
 import express from "express";
 import { errorHandler } from "./middleware/error-handler.ts";
 import { notFound } from "./middleware/not-found.ts";
+import { authRouter } from "./modules/auth/auth.routes.ts";
 import { usersRouter } from "./modules/users/users.routes.ts";
 import { env } from "./shared/env.ts";
 
@@ -14,6 +15,7 @@ app.get("/health", (_req, res) => {
   res.json({ status: "ok" });
 });
 
+app.use("/auth", authRouter);
 app.use("/users", usersRouter);
 app.use(notFound);
 app.use(errorHandler);

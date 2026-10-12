@@ -15,3 +15,20 @@ Changes
 - Add request-id middleware so Coralogix can group one request’s logs.
 
 Do not treat AppError as “skip logging”. Treat it as “expected, still record it”.
+
+---
+
+Rate limit store (multi-instance)
+
+Current: `express-rate-limit` uses the default in-memory store in
+`backend/src/middleware/rate-limit.ts`. Counters live in one Node process.
+
+That does not work with more than one API instance (each process has its own
+counts; an attacker can spread attempts across instances).
+
+Changes
+- Use a shared store (Redis via `rate-limit-redis`, or equivalent) so login and
+  register limits apply across all instances.
+- Keep the same windows and keys (IP + email).
+- Do not log emails or tokens from the store.
+- Fail closed or fail open should be an explicit decision when the store is down.
