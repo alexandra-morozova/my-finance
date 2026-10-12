@@ -1,0 +1,17 @@
+Error handler + Coralogix
+
+Current: unexpected errors go to console.error; AppError is not logged at all.
+That will not work well in Coralogix (no structured fields, 5xx from AppError are invisible).
+
+Changes
+- Replace console.error with a JSON logger (pino) and ship logs to Coralogix
+  (pino-coralogix, OpenTelemetry, or Coralogix Fluent Bit / log shipper).
+- Log every error in the handler with: timestamp, level, status, message, stack,
+  method, path, requestId. Coralogix needs JSON lines, not Error dumps.
+- Severity: AppError with 4xx → warn (or info for 404). 5xx and unknown → error.
+- Keep the HTTP response as-is (hide message/stack in production). Logging is separate.
+- Add env: CORALOGIX_PRIVATE_KEY, CORALOGIX_APP_NAME, CORALOGIX_SUBSYSTEM
+  (and maybe CORALOGIX_DOMAIN). Do not commit secrets.
+- Add request-id middleware so Coralogix can group one request’s logs.
+
+Do not treat AppError as “skip logging”. Treat it as “expected, still record it”.

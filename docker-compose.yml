@@ -1,19 +1,22 @@
 services:
-  mongo:
-    image: mongo:8
+  postgres:
+    image: postgres:17
     restart: unless-stopped
     ports:
-      - "27017:27017"
-    volumes:
-      - mongo_data:/data/db
+      # Host 5433: another local Postgres already binds 5432.
+      - "5433:5432"
     environment:
-      MONGO_INITDB_DATABASE: myfinance
+      POSTGRES_USER: myfinance
+      POSTGRES_PASSWORD: myfinance
+      POSTGRES_DB: myfinance
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      test: ["CMD-SHELL", "pg_isready -U myfinance -d myfinance"]
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 15s
+      start_period: 10s
 
 volumes:
-  mongo_data:
+  postgres_data:

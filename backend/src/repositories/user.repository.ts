@@ -1,46 +1,64 @@
 import type { NewUser, User } from "../domain/user.ts";
-import { UserModel, type UserDoc } from "../models/user.model.ts";
+import { prisma } from "../config/db.config.ts";
 
-function toUser(doc: UserDoc): User {
-  return {
-    id: doc._id.toString(),
-    email: doc.email,
-    name: doc.name,
-    createdAt: doc.createdAt,
-    updatedAt: doc.updatedAt,
-  };
-}
+const userSelect = {
+  id: true,
+  email: true,
+  name: true,
+  createdAt: true,
+  updatedAt: true,
+} as const;
 
 export async function createUser(input: NewUser): Promise<User> {
-  const doc = await UserModel.create({
-    email: input.email,
-    password: input.passwordHash,
-    name: input.name,
+  return prisma.user.create({
+    data: {
+      email: input.email.toLowerCase(),
+      passwordHash: input.passwordHash,
+      name: input.name,
+    },
+    select: userSelect,
   });
-  return toUser(doc);
 }
 
 export async function findUserById(id: string): Promise<User | null> {
-  const doc = await UserModel.findById(id);
-  return doc ? toUser(doc) : null;
+  return prisma.user.findUnique({
+    where: { id },
+    select: userSelect,
+  });
 }
 
 export async function findUserByEmail(email: string): Promise<User | null> {
-  const doc = await UserModel.findOne({ email: email.toLowerCase() });
-  return doc ? toUser(doc) : null;
+  return prisma.user.findUnique({
+    where: { email: email.toLowerCase() },
+    select: userSelect,
+  });
 }
 
 export async function updateUserPassword(id: string, passwordHash: string): Promise<boolean> {
-  const doc = await UserModel.findByIdAndUpdate(id, { password: passwordHash });
-  return doc !== null;
+  const existing = await prisma.user.findUnique({
+    where: { id },
+    select: { id: true },
+  });
+  if (!existing) {
+    return false;
+  }
+  await prisma.user.update({
+    where: { id },
+    data: { passwordHash },
+  });
+  return true;
 }
 
 export async function findUserCredentialsByEmail(
   email: string,
 ): Promise<{ user: User; passwordHash: string } | null> {
-  const doc = await UserModel.findOne({ email: email.toLowerCase() }).select("+password");
-  if (!doc) {
+  const row = await prisma.user.findUnique({
+    where: { email: email.toLowerCase() },
+    select: { ...userSelect, passwordHash: true },
+  });
+  if (!row) {
     return null;
   }
-  return { user: toUser(doc), passwordHash: doc.password };
+  const { passwordHash, ...user } = row;
+  return { user, passwordHash };
 }

@@ -21,6 +21,9 @@ build/
 coverage/
 *.tsbuildinfo
 
+# Prisma generated client
+backend/src/generated/
+
 # OS
 .DS_Store
 Thumbs.db
@@ -39,4 +42,3 @@ docker-compose.override.yml
 *.pem
 *.key
 dump.rdb
-*.mongo.dump

@@ -10,7 +10,7 @@ export const env = {
   PORT: Number(required("PORT", "4000")),
   BASE_URL: required("BASE_URL", "http://localhost:4000"),
   NODE_ENV: required("NODE_ENV", "development"),
-  MONGO_URI: required("MONGO_URI"),
+  DATABASE_URL: required("DATABASE_URL"),
   JWT_SECRET: required("JWT_SECRET"),
   JWT_EXPIRES_IN: required("JWT_EXPIRES_IN"),
   JWT_REFRESH_SECRET: required("JWT_REFRESH_SECRET"),
