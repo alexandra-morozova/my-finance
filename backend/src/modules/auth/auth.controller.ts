@@ -15,6 +15,6 @@ export const register: RequestHandler = async (req, res) => {
   const { email, password, name } = req.body;
   await registerUser({ email, password, name });
   res.status(HTTP_STATUS.CREATED).json({
-    message: "If this email is not already registered, the account was created.",
+    message: "Sign in with the email and password you just entered.",
   });
 };

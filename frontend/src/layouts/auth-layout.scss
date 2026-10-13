@@ -1,0 +1,23 @@
+@use "../styles/variables" as *;
+
+.auth-layout {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: $space;
+}
+
+.auth-layout__card {
+  width: 100%;
+  max-width: $auth-card-width;
+  padding: $space;
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.06);
+}
+
+.auth-layout__footer {
+  margin-top: 16px;
+  text-align: center;
+}
