@@ -1,17 +1,87 @@
+# Design Document: Resilient Banking Web Authentication and Session Management
 
+**Status:** Future-state proposal — architecture decision required; not approved for current v1 implementation
+**Priority:** High if adopted — security-critical
+**Target stack:** Node.js / Express 5 (current backend framework), PostgreSQL, Redis, a managed KMS/HSM, and a trusted OAuth 2.0 / OpenID Connect provider
+**Architecture:** Proposed distributed, multi-instance, multi-availability-zone design
+**Primary objective:** Secure browser authentication with server-side provider-token management, durable session control, and no single point of failure within the designed failure domain.
+
+---
+
+## Relationship to the current MyFinance implementation
+
+This is a **future-state proposal**, not a description of the currently implemented login flow. The current application uses password-based authentication and an `httpOnly` `access_token` cookie (with Bearer-token support); [for-next-version-be.md](./for-next-version-be.md) proposes near-term hardening of that model using an application-issued opaque refresh token and `auth_epoch`.
+
+This document proposes a different session model: an OIDC login flow, an opaque `__Host-bank-session` cookie, and server-side storage of provider-issued OAuth tokens. Those approaches are not interchangeable. Before implementation, explicitly decide whether this proposal replaces the current password/JWT flow, is used only for a separate banking-provider connection boundary, or is deferred. Do not implement both as one blended session system without documenting the trust boundary and API contracts.
+
+The tokens in the two documents also have different roles: the refresh token proposed in `for-next-version-be.md` is an **application-issued** credential whose hash can be stored; this proposal handles **provider-issued** refresh tokens that the server must recover to call the provider, so it requires encrypted storage. Keep those token types and stores distinct.
+
+---
+
+## 1. Executive Summary
+
+If this proposal is approved, implement a Backend for Frontend (BFF) architecture for banking web access.
+
+The browser must never receive OAuth access tokens or refresh tokens. It receives only an opaque session identifier in a secure cookie. The backend uses this identifier to locate the authenticated session and retrieve the required token material.
+
+The system separates active session caching from durable security state:
+
+- **BFF instances:** Stateless application instances deployed across multiple availability zones.
+- **Redis:** Highly available cache for active sessions and other short-lived operational state.
+- **PostgreSQL:** Highly available durable store for session lifecycle, revocation state, token metadata, and audit records.
+- **Token vault:** Restricted service or module responsible for encrypted refresh-token storage, access-token handling, and token rotation.
+- **KMS/HSM:** Managed key protection and cryptographic operations, deployed with an appropriate high-availability and recovery strategy.
+- **Identity provider:** Trusted OAuth 2.0 / OpenID Connect provider, or an equivalent internal authentication service.
+
+The design must not depend on a single BFF process, Redis node, database primary, availability zone, or locally stored secret.
+
+A critical security invariant is that **a revoked session must not become usable again because of a cache miss, stale cache entry, failover, or recovery procedure**.
+
+## 2. Goals and Non-Goals
+
+### 2.1 Goals
+
+1. Keep access and refresh tokens out of browser JavaScript.
+2. Support multiple BFF instances without sticky sessions.
+3. Support high availability across multiple availability zones.
+4. Provide durable session revocation and controlled session expiration.
+5. Protect refresh tokens at rest and during rotation.
+6. Avoid stale caches overriding authoritative security decisions.
+7. Survive individual instance, cache-node, database-node, and availability-zone failures.
+8. Make failure behavior explicit and testable.
+9. Provide security auditability without recording credentials.
+10. Support horizontal scaling and rolling deployments.
+
+### 2.2 Non-goals
+
+- Replacing the identity provider.
+- Building a custom cryptographic protocol.
+- Guaranteeing availability when every replica or the authoritative data service is unavailable.
+- Guaranteeing immediate invalidation of independently issued JWTs without a corresponding enforcement mechanism.
+- Implementing banking ledger transactions or payment processing in the authentication subsystem.
+
+## 3. Architecture
+
+### 3.1 Logical topology
+
+Browser → Load balancer / WAF → Multiple BFF instances → Redis and PostgreSQL
+
+#### Architecture overview
+
+```mermaid
 flowchart TB
     Browser["Web Browser<br/>Opaque HttpOnly Secure Cookie<br/>No OAuth tokens"]
     WAF["Load Balancer / WAF<br/>HTTPS · DDoS Protection"]
 
     subgraph APP["Application Layer — Multi-AZ BFF"]
         subgraph AZA["Availability Zone A"]
-            BFF1["BFF Instance A<br/>Node.js / NestJS"]
+            BFF1["BFF Instance A<br/>Node.js / Express 5"]
         end
         subgraph AZB["Availability Zone B"]
-            BFF2["BFF Instance B<br/>Node.js / NestJS"]
+            BFF2["BFF Instance B<br/>Node.js / Express 5"]
         end
         subgraph AZC["Availability Zone C"]
-            BFF3["BFF Instance C<br/>Node.js / NestJS"]
+            BFF3["BFF Instance C<br/>Node.js / Express 5"]
         end
     end
 
@@ -90,67 +160,7 @@ flowchart TB
     class P1,P2,P3 database
     class TV,KMS security
     class IDP,API,AUDIT,MON external
-
-
-
-
-# Design Document: Resilient Banking Web Authentication and Session Management
-
-**Status:** Proposed — for implementation planning  
-**Priority:** High — security-critical  
-**Target stack:** Node.js / NestJS or Express, PostgreSQL, Redis  
-**Architecture:** Distributed, multi-instance, multi-availability-zone  
-**Primary objective:** Secure browser authentication with server-side OAuth token management, durable session control, and no single point of failure within the designed failure domain.
-
----
-
-## 1. Executive Summary
-
-Implement a Backend for Frontend (BFF) architecture for a banking web application.
-
-The browser must never receive OAuth access tokens or refresh tokens. It receives only an opaque session identifier in a secure cookie. The backend uses this identifier to locate the authenticated session and retrieve the required token material.
-
-The system separates active session caching from durable security state:
-
-- **BFF instances:** Stateless application instances deployed across multiple availability zones.
-- **Redis:** Highly available cache for active sessions and other short-lived operational state.
-- **PostgreSQL:** Highly available durable store for session lifecycle, revocation state, token metadata, and audit records.
-- **Token vault:** Restricted service or module responsible for encrypted refresh-token storage, access-token handling, and token rotation.
-- **KMS/HSM:** Managed key protection and cryptographic operations, deployed with an appropriate high-availability and recovery strategy.
-- **Identity provider:** Trusted OAuth 2.0 / OpenID Connect provider, or an equivalent internal authentication service.
-
-The design must not depend on a single BFF process, Redis node, database primary, availability zone, or locally stored secret.
-
-A critical security invariant is that **a revoked session must not become usable again because of a cache miss, stale cache entry, failover, or recovery procedure**.
-
-## 2. Goals and Non-Goals
-
-### 2.1 Goals
-
-1. Keep access and refresh tokens out of browser JavaScript.
-2. Support multiple BFF instances without sticky sessions.
-3. Support high availability across multiple availability zones.
-4. Provide durable session revocation and controlled session expiration.
-5. Protect refresh tokens at rest and during rotation.
-6. Avoid stale caches overriding authoritative security decisions.
-7. Survive individual instance, cache-node, database-node, and availability-zone failures.
-8. Make failure behavior explicit and testable.
-9. Provide security auditability without recording credentials.
-10. Support horizontal scaling and rolling deployments.
-
-### 2.2 Non-goals
-
-- Replacing the identity provider.
-- Building a custom cryptographic protocol.
-- Guaranteeing availability when every replica or the authoritative data service is unavailable.
-- Guaranteeing immediate invalidation of independently issued JWTs without a corresponding enforcement mechanism.
-- Implementing banking ledger transactions or payment processing in the authentication subsystem.
-
-## 3. Architecture
-
-### 3.1 Logical topology
-
-Browser → Load balancer / WAF → Multiple BFF instances → Redis and PostgreSQL
+```
 
 The BFF communicates with:
 
@@ -552,8 +562,8 @@ Agents implementing this design must:
 9. Document every residual single point of failure and every scenario in which immediate revocation cannot be guaranteed.
 10. Do not claim production readiness until the security and resilience acceptance criteria have been demonstrated.
 
-### Final design decision
+### Proposed target architecture (pending approval)
 
-Use a **stateless, multi-zone BFF; Redis for active session caching; PostgreSQL or an equivalent durable authoritative store for session lifecycle and revocation; encrypted durable refresh-token storage; and a highly available key-management service**.
+If approved, use a **stateless, multi-zone BFF; Redis for active session caching; PostgreSQL or an equivalent durable authoritative store for session lifecycle and revocation; encrypted durable refresh-token storage; and a highly available key-management service**.
 
 Prefer consistency over availability for security-critical authorization and revocation decisions. Use caching and redundancy to preserve performance and availability without allowing stale state to grant access.

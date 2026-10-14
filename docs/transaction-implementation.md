@@ -1,7 +1,7 @@
 # Transactions — implementation backlog
 
-**Status:** In progress — execute **one phase at a time**; get user confirmation before starting the next phase.  
-**Design (semantics, security, sync, performance):** [transaction-design.md](./transaction-design.md)  
+**Status:** Phased backlog — Phases 0–2 complete per tracker; Phase 3 is next and awaits explicit user confirmation. Execute **one phase at a time**.
+**Design (semantics, security, sync, performance):** [transaction-design.md](./transaction-design.md)
 **Do not drift:** If code disagrees with the design doc, fix code or update the design doc first — not both silently.
 
 ---
@@ -30,7 +30,7 @@
 
 ## Phase 1 — Schema, accounts module, layer cleanup
 
-**Completed 2026-10-14. User confirmation required before Phase 2.**
+**Completed 2026-10-14.**
 
 ### Database
 
@@ -61,7 +61,7 @@
 
 ## Phase 2 — Read API + ownership tests
 
-**Completed 2026-10-14. User confirmation required before Phase 3.**
+**Completed 2026-10-14. Phase 3 is next and must not start until the user confirms.**
 
 - [x] `transaction.validation.ts`: query params (limit, cursor, accountId, status, from, to).
 - [x] `GET /transactions` with compound cursor `(date, id)` per design §7.1.

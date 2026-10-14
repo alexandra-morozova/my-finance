@@ -1,7 +1,7 @@
 # Email verification — implementation backlog
 
-**Status:** Not implemented (reverted). Use this file when picking the work up again.  
-**Design (API, security, flows):** [email-verification-design.md](./email-verification-design.md)  
+**Status:** Not implemented; previous attempt reverted. This is the implementation checklist to use when work resumes.
+**Design (API, security, flows):** [email-verification-design.md](./email-verification-design.md)
 **Production scale (outbox, rate limits):** design doc §8.4 + [for-next-version-be.md](./for-next-version-be.md)
 
 ---
@@ -16,7 +16,7 @@ Verify-before-sign-in: new users must confirm email ownership before `POST /auth
 
 - [ ] Read `email-verification-design.md` end-to-end.
 - [ ] Local Postgres available (`pnpm db:migrate` from `backend/`).
-- [ ] Decide register-on-send-failure: strict rollback vs keep user + resend (design §6.1).
+- [ ] Decide delivery policy before coding: synchronous send with explicit compensation, or transactional outbox. Prefer outbox for resilient delivery; follow design §8.4 if selected.
 
 ---
 
@@ -93,7 +93,7 @@ Optional later: Supertest + test database integration path.
 
 ## Step 8 — Hardening (post-MVP)
 
-From design §8.4 and core review notes:
+Deferred hardening from design §8.4 and core review notes; these items are not currently implemented unless the live repository proves otherwise:
 
 - [ ] `requireAuth`: load user, reject if `emailVerifiedAt` null (with future `auth_epoch`).
 - [ ] Resend `fetch` timeout; optional rate limit on verify POST.
@@ -115,11 +115,11 @@ From design §8.4 and core review notes:
 
 ## Suggested commit order
 
-1. Schema + migration only  
-2. Repository + errors + sha256  
-3. Mail + env  
-4. Services + routes  
-5. Frontend  
-6. Tests  
+1. Schema + migration only
+2. Repository + errors + sha256
+3. Mail + env
+4. Services + routes
+5. Frontend
+6. Tests
 
 Confirm with stakeholder after each step if using phased delivery.

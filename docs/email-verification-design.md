@@ -1,9 +1,9 @@
 # Design Document: Email Verification at Registration
 
-**Status:** Proposed — for implementation  
-**Priority:** Medium — security and account integrity  
-**Target stack:** Express API, PostgreSQL (Prisma), React SPA (Vite)  
-**Related:** [todo-be.md](./todo-be.md), [for-next-version-be.md](./for-next-version-be.md) (future `auth_epoch` / refresh tokens)
+**Status:** Proposed; not implemented (the previous implementation attempt was reverted)
+**Priority:** Medium — security and account integrity
+**Target stack:** Express 5 API, PostgreSQL (Prisma), React SPA (Vite)
+**Related:** [todo-be.md](./todo-be.md), [email-verification-implementation.md](./email-verification-implementation.md), [for-next-version-be.md](./for-next-version-be.md) (future `auth_epoch` / refresh tokens)
 
 ---
 
@@ -14,6 +14,10 @@ When a user registers with an email and password, the application must confirm *
 The chosen model is **verify before sign-in**: registration creates the account and sends a verification message; login is rejected until `emailVerifiedAt` is set. This matches common fintech and SaaS practice and fits the existing flow (register → redirect to login, no session on signup).
 
 This document does **not** replace password auth with magic links and does **not** require an external identity provider.
+
+**Implementation status:** This document describes target behavior, not current production behavior. Until the backlog is completed, registration does not require email verification and the verification endpoints should not be assumed to exist.
+
+**Architecture boundary:** This design extends the current password-based authentication flow. If the OIDC/BFF proposal in [auth-sys-design.md](./auth-sys-design.md) is adopted, revisit this flow and its session assumptions before implementation.
 
 ---
 
@@ -131,17 +135,17 @@ All paths under existing auth module unless a dedicated small module is preferre
 2. For a **newly created** user:
    - Insert verification token (hash).
    - Send transactional email with verify link.
-3. **If email send fails:** product choice:
-   - **Strict (recommended for finance):** roll back user creation or do not commit until send succeeds; return safe 503/500 without revealing whether email exists.
-   - **Pragmatic:** persist user + outbox row for retry worker (when outbox exists).
+3. **If email send fails — decision required before implementation:**
+   - **Synchronous delivery:** choose and test a consistent failure policy. Do not assume a database transaction can atomically commit a user and a remote email send; compensate carefully if the send fails.
+   - **Transactional outbox (preferred for resilient delivery):** commit the user, verification-token row, and outbox event in one database transaction; return after commit and let a worker retry delivery. This is the target described in §8.4 and removes the provider from the registration request's critical path.
 
-**Response (201):** update message for new registrations, e.g.  
-`"Check your email to verify your account, then sign in."`  
+**Response (201):** update message for new registrations, e.g.
+`"Check your email to verify your account, then sign in."`
 Duplicate-email path keeps the same generic message as today (no branch that reveals taken email).
 
 ### 6.2 Verify — `POST /auth/verify-email`
 
-**Body:** `{ "token": string }`  
+**Body:** `{ "token": string }`
 **CSRF:** yes (Origin check).
 
 **Behavior:**
@@ -158,7 +162,7 @@ Do not set auth cookies on verify (user still signs in with password).
 
 ### 6.3 Resend — `POST /auth/resend-verification`
 
-**Body:** `{ "email": string }`  
+**Body:** `{ "email": string }`
 **CSRF:** yes.
 
 **Behavior:**
@@ -167,7 +171,7 @@ Do not set auth cookies on verify (user still signs in with password).
 2. If user exists and `emailVerifiedAt` is null: invalidate old unused tokens, create new token, send email.
 3. If user does not exist, or already verified: **no email**; same response as success.
 
-**Response (200 or 202):** always generic, e.g.  
+**Response (200 or 202):** always generic, e.g.
 `"If an account exists and is unverified, we sent a verification email."`
 
 **Rate limit:** stricter than register — e.g. **3 requests / hour** per IP+email (add to rate-limit middleware).
@@ -176,7 +180,7 @@ Do not set auth cookies on verify (user still signs in with password).
 
 After successful password check:
 
-- If `emailVerifiedAt` is null → **403 Forbidden** with stable machine-readable code, e.g.  
+- If `emailVerifiedAt` is null → **403 Forbidden** with stable machine-readable code, e.g.
   `{ "code": "EMAIL_NOT_VERIFIED", "message": "Verify your email before signing in." }`
 - Do **not** set `access_token` cookie.
 
@@ -249,8 +253,8 @@ Use a **transactional** provider (e.g. Resend, Postmark, Amazon SES, SendGrid):
 ### 8.2 Message content
 
 - Subject: clear and branded (e.g. “Verify your MyFinance email”).
-- Body: short explanation + button linking to  
-  `{FRONTEND_URL}/verify-email?token={rawToken}`  
+- Body: short explanation + button linking to
+  `{FRONTEND_URL}/verify-email?token={rawToken}`
 - Mention link expiry (48 hours).
 - No passwords, no JWTs, no session cookies in the email.
 

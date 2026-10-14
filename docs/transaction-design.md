@@ -1,9 +1,9 @@
 # Design Document: Transactions, Accounts, and Bank Sync
 
-**Status:** Approved for phased implementation — follow [transaction-implementation.md](./transaction-implementation.md)  
-**Priority:** High — core product data  
-**Target stack:** Express API, PostgreSQL (Prisma), React SPA (Vite)  
-**Related:** [todo-be.md](./todo-be.md), [auth-sys-design.md](./auth-sys-design.md) (banking APIs off request path), `.cursor/rules/athomic-one-time-consumption.md` (idempotent imports)
+**Status:** Approved for phased implementation — follow [transaction-implementation.md](./transaction-implementation.md)
+**Priority:** High — core product data
+**Target stack:** Express API, PostgreSQL (Prisma), React SPA (Vite)
+**Related:** [todo-be.md](./todo-be.md), [transaction-implementation.md](./transaction-implementation.md), [for-next-version-be.md](./for-next-version-be.md). The OIDC/BFF proposal in [auth-sys-design.md](./auth-sys-design.md) is an optional future architecture and is not required to implement the transaction module.
 
 ---
 
@@ -47,10 +47,15 @@ This document is the source of truth for schema semantics, security, sync archit
 
 ## 3. Current System Context
 
-- Auth: JWT in httpOnly cookie or Bearer; `requireAuth` sets `userId` on request.
-- CSRF: mutating routes require `Origin === FRONTEND_URL` unless Bearer.
+**Documented state (14 October 2026; see [implementation backlog](./transaction-implementation.md)):** Phases 1 and 2 are marked complete. Verify the live repository and test results before treating this status as release evidence.
+
+- Auth: password/JWT flow; an `httpOnly` `access_token` cookie is set on login, Bearer tokens are accepted, and `requireAuth` provides the authenticated `userId`.
+- CSRF: mutating routes require `Origin === FRONTEND_URL` unless Bearer, per current backend notes.
 - Prisma client: `backend/generated/prisma`; schema in `backend/prisma/schema.prisma`.
-- Feature stub: `backend/src/modules/transaction/` exists; listing logic was drafted in the wrong layer (`transaction.controller.ts` references a non-existent `Transaction` model). Phase 1 refactors into repository/service/controller per [backend/AGENTS.md](../backend/AGENTS.md).
+- Accounts: authenticated `GET /accounts` and `POST /accounts` are implemented per the tracker.
+- Transactions: authenticated `GET /transactions` and `GET /transactions/:id` are implemented per the tracker. Reads are user-scoped, exclude `deletedAt` rows, use keyset pagination over `(date, id)`, and map database records to an API DTO.
+- Not yet implemented in the transaction backlog: manual transaction mutations, transfer/refund operations, import, background bank synchronization, and performance/load-test sign-off (Phases 3–7).
+- Layering follows `backend/AGENTS.md`: routes → controllers → services → repositories. This design remains the source of truth for transaction semantics and constraints.
 
 ---
 

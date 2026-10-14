@@ -1,171 +1,125 @@
-Error handler + Coralogix
+# Deferred backend hardening and next-version plan
 
-Current: unexpected errors go to console.error; AppError is not logged at all.
-That will not work well in Coralogix (no structured fields, 5xx from AppError are invisible).
+**Status:** Backlog — proposed work, not a claim of implementation. The current-state notes below come from the supplied backend status snapshot and should be rechecked against the live repository before execution.
 
-Changes
-- Replace console.error with a JSON logger (pino) and ship logs to Coralogix
-  (pino-coralogix, OpenTelemetry, or Coralogix Fluent Bit / log shipper).
-- Log every error in the handler with: timestamp, level, status, message, stack,
-  method, path, requestId. Coralogix needs JSON lines, not Error dumps.
-- Severity: AppError with 4xx → warn (or info for 404). 5xx and unknown → error.
-- Keep the HTTP response as-is (hide message/stack in production). Logging is separate.
-- Add env: CORALOGIX_PRIVATE_KEY, CORALOGIX_APP_NAME, CORALOGIX_SUBSYSTEM
-  (and maybe CORALOGIX_DOMAIN). Do not commit secrets.
-- Add request-id middleware so Coralogix can group one request’s logs.
+This file tracks improvements to the **existing Express 5 + password/JWT authentication stack**. It is distinct from [auth-sys-design.md](./auth-sys-design.md), which proposes an OIDC/BFF session architecture. The latter uses an opaque browser session and recoverable, encrypted provider refresh tokens; this file proposes app-issued opaque refresh tokens whose hashes are stored. These designs must not be blended. Resolve the authentication roadmap before implementing overlapping session/token changes.
 
-Do not treat AppError as “skip logging”. Treat it as “expected, still record it”.
+## Suggested priority order
+
+1. Shared rate-limit storage and structured error logging/request IDs.
+2. Authentication audit events and explicit revocation/refresh semantics.
+3. User closure and financial-data retention workflow (legal/product decision required).
+4. HSTS preload evaluation only after domain readiness is verified.
 
 ---
 
-Rate limit store (multi-instance)
+## 1. Error handler, structured logging, and Coralogix
 
-Current: `express-rate-limit` uses the default in-memory store in
-`backend/src/middleware/rate-limit.ts`. Counters live in one Node process.
+**Current state in notes:** Unexpected errors go to `console.error`; `AppError` instances are not logged consistently. There are no structured fields for Coralogix, and 5xx `AppError` cases may be invisible.
 
-That does not work with more than one API instance (each process has its own
-counts; an attacker can spread attempts across instances).
+**Proposed work**
+- Replace ad-hoc error logging with a structured JSON logger (e.g. Pino) and ship logs using an agreed mechanism (OpenTelemetry, a supported Pino transport, or a log shipper).
+- Log each handled error with timestamp, level, status, safe message, stack where appropriate, method, path, and `requestId`.
+- Severity: 4xx `AppError` → `warn` (or `info` for routine 404s); 5xx and unknown → `error`.
+- Keep production HTTP responses safe; logging must not reveal stack traces or secrets to clients.
+- Add validated environment configuration for `CORALOGIX_PRIVATE_KEY`, `CORALOGIX_APP_NAME`, `CORALOGIX_SUBSYSTEM`, and only add `CORALOGIX_DOMAIN` if needed by the chosen endpoint.
+- Add request-ID middleware so logs for one request can be correlated.
+- Never log passwords, cookies, access/refresh tokens, raw verification tokens, or full verification URLs. Treat emails as PII according to the application's logging policy.
 
-Changes
-- Use a shared store (Redis via `rate-limit-redis`, or equivalent) so login and
-  register limits apply across all instances.
-- Keep the same windows and keys (IP + email).
-- Do not log emails or tokens from the store.
-- Fail closed or fail open should be an explicit decision when the store is down.
-
-No account lockout. Login is only 10 tries / 15 min per IP+email (in memory).
-There is no freeze of the email/account itself, no captcha, no backoff that
-survives process restart. A guesser can rotate IPs and stay under the cap.
-Do not add “lock this email after N failures” without an unlock path: an
-attacker can use it to lock a victim out (account-lock DoS). If lockout is
-added later, it is separate from the Redis shared counter; prefer
-progressive delay or captcha over freezing the account.
+Do not skip logging merely because an error is an expected `AppError`; choose severity based on the error class and status.
 
 ---
 
-Login audit log
+## 2. Shared rate-limit store for multiple API instances
 
-Current: login success and failure are not recorded. Failed login is a 401
-AppError (error handler does not log AppError). Success is silent. Coralogix
-in the section above is the error-handler/shipper work, not an auth audit
-trail.
+**Current state in notes:** `express-rate-limit` uses the default in-memory store in `backend/src/middleware/rate-limit.ts`. Counters are local to a Node process and therefore are not shared across instances.
 
-Changes (with the JSON logger / Coralogix work, not a second logging stack)
-- Log login success: timestamp, requestId, user id, IP. Do not log the
-  password or the token.
-- Log login failure: timestamp, requestId, IP, generic reason
-  (unknown email vs bad password must stay indistinguishable in the HTTP
-  response; the log may use an internal code). Do not log the password.
-- Do not log the raw email in production if that is treated as PII; hash or
-  redact if required.
-- Register attempts are out of scope until product wants them.
+**Proposed work**
+- Use Redis (`rate-limit-redis`) or an equivalent shared store so login/register limits apply across all API instances; include resend-verification when that feature is implemented.
+- Keep the documented windows and keys (IP + email), with appropriate PII protection.
+- Explicitly choose fail-open or fail-closed behavior if the shared store is unavailable.
+
+Do not add a permanent account/email lockout without a safe recovery path: that can let an attacker lock a victim out. If more abuse controls become necessary, evaluate progressive delay or CAPTCHA separately from shared counters.
 
 ---
 
-Token revocation (access + refresh)
+## 3. Login audit events
 
-Current: login sets an httpOnly access-token cookie (Bearer still accepted).
-There is no logout route. A pasted `Authorization: Bearer` JWT still works
-until `exp`. The JWT is verified for signature, exp, iss, aud, alg. There is
-no refresh token, and `requireAuth` does not check that the user still exists
-or that credentials changed. Access TTL is `JWT_EXPIRES_IN` (example 1h).
-`JWT_REFRESH_SECRET` and `JWT_REFRESH_EXPIRES_IN` are unused.
+**Current state in notes:** Login success and failure are not recorded as audit events. The general error logger is not a substitute for an authentication audit trail.
 
-New login does not kill the previous JWT. This browser gets a new cookie;
-a copied old token (Bearer paste, another tab/client) still works until
-`exp`. That stays true after refresh/epoch ships: login overwrites the
-cookie and starts a new refresh family, but it must not bump
-`users.auth_epoch` (that would log out every device). The copy dies when
-`exp` hits, or when epoch is bumped (password change / disable /
-logout-all).
+**Proposed work**
+- Log success with timestamp, request ID, user ID, and IP; do not log passwords or tokens.
+- Log failure with timestamp, request ID, IP, and a generic internal reason. Unknown email and incorrect password must remain indistinguishable in the HTTP response.
+- Do not log raw email in production if treated as PII; redact or use a keyed/pseudonymous representation according to policy.
+- Registration-attempt audit is out of scope unless separately approved.
 
-Do not try to delete access JWTs. They stay valid until `exp` unless every
-request hits the server. Clearing the cookie does not revoke a copied token.
-Revoke by: short access lifetime + stored refresh tokens you can delete +
-`users.auth_epoch` vs JWT claim `ver` for “kill this user’s access tokens.”
-
-Do not use a Redis denylist of access `jti`s as the main mechanism (needs
-Redis you do not have yet; duplicates refresh + epoch). Optional later if a
-15-minute theft window is still too long.
-
-Access JWT
-- Lifetime: 15 minutes (not 1h).
-- Claims: `sub`, `ver`, `iss`, `aud`, `iat`, `exp`, `jti` (id for logs, not a
-  denylist). Still no password or PII.
-- Cookie: existing httpOnly / Secure / SameSite=Lax `access_token`.
-
-Refresh token
-- Lifetime: 7 days (`JWT_REFRESH_EXPIRES_IN`).
-- Opaque secret, not a JWT verified without the DB. Store **sha256 hash
-  only**.
-- Second httpOnly cookie `refresh_token`, `path=/auth`, Secure, SameSite=Lax.
-- Never put refresh tokens in JSON or localStorage. Do not log tokens.
-
-Postgres
-- `users.auth_epoch` Int default 0. Bump on password change, disable
-  account, “log out everywhere.” Access JWT `ver` must match.
-- `refresh_tokens`: `id`, `userId`, `tokenHash` (unique), `familyId`,
-  `expiresAt`, `revokedAt` (nullable), `replacedById` (nullable).
-
-Login
-- Create a refresh family, store hash, set both cookies. JSON stays `{ user }`.
-- Do not bump `auth_epoch`. Do not revoke other devices' refresh families.
-- A copied previous access JWT remains valid until `exp`.
-
-POST /auth/refresh (cookie CSRF rules apply)
-1. Hash the presented token, load row.
-2. Missing / expired / `revokedAt` set → 401, clear cookies.
-3. If `replacedById` is set → reuse (stolen token): revoke the **entire
-   family**.
-4. Else rotate: revoke old row, insert new hash in the same family, mint a
-   new access JWT with current `auth_epoch`.
-
-POST /auth/logout
-- Revoke this family, clear both cookies. Other devices keep working.
-- Current access cookie may work until `exp` (≤15 min). Do not bump
-  `auth_epoch` here (that would log out every device).
-
-Password change / disable / logout-all
-- `auth_epoch += 1` and revoke all refresh rows for that user.
-- Existing access tokens fail on the next `requireAuth` lookup.
-
-requireAuth
-1. Cookie or Bearer, as now.
-2. `jwtVerify` (sig, exp, iss, aud, alg).
-3. `findUserById(sub)` — no user or JWT `ver !== users.auth_epoch` → 401
-   (this is what stops a JWT pasted after logout-all / password change /
-   disable; normal logout does not bump epoch).
-Do not consult `refresh_tokens` on every API call.
+Use the structured logging pipeline above rather than creating a second logging stack.
 
 ---
 
-User deletion and financial retention (GDPR)
+## 4. App-issued access/refresh token revocation
 
-Current: no user-delete API. Postgres RESTRICT on `accounts.user_id` and
-`transactions.user_id` → `users.id` so a bare ORM user delete fails when
-financial rows exist. Email verification tokens still CASCADE with user.
-See [transaction-design.md](./transaction-design.md) §6.4 and
-`backend/tests/integration/user-deletion-policy.test.ts`.
+**Scope:** This plan extends the current password-based JWT design. It is not the provider-token vault design in [auth-sys-design.md](./auth-sys-design.md).
 
-Deferred product workflow (legal review required)
-- Account closure (inactive/hidden, stop sync) vs erasure.
-- Data export before deletion.
-- Retention holds (tax, dispute, regulatory) vs anonymize PII.
-- Admin or batch job with audit log — not `ON DELETE CASCADE` on financial tables.
+**Current state in notes:** Login sets an `httpOnly` access-token cookie and Bearer tokens are accepted. No logout or refresh route exists in the documented baseline. A copied access JWT stays usable until expiry; clearing a cookie does not revoke a copied token. `requireAuth` does not yet check the user record or whether credentials changed. The documented access TTL example is one hour; refresh-related env variables are unused.
+
+**Target design**
+
+- Access JWT lifetime: 15 minutes rather than one hour.
+- Claims: `sub`, `ver`, `iss`, `aud`, `iat`, `exp`, and `jti`; no password or unnecessary PII. `jti` is for correlation, not a primary denylist.
+- Access cookie: existing `httpOnly`, `Secure` in production, `SameSite=Lax` cookie named `access_token`.
+- App-issued refresh token: high-entropy opaque secret, seven-day lifetime, **store SHA-256 hash only**; never return it in JSON or place it in web storage or logs.
+- Refresh cookie: `httpOnly`, `Secure` in production, `SameSite=Lax`, path `/auth`, named `refresh_token`.
+- Add `users.auth_epoch` (integer default `0`) and compare it with JWT claim `ver` during `requireAuth`.
+- Add a `refresh_tokens` table with at least `id`, `userId`, unique `tokenHash`, `familyId`, `expiresAt`, `revokedAt`, and `replacedById`.
+
+**Login**
+- Create a refresh-token family, persist the hash, and set both cookies.
+- Do not bump `auth_epoch` or revoke other devices' refresh families on an ordinary login.
+- A copied older access JWT remains valid until its expiry unless an epoch change invalidates it.
+
+**`POST /auth/refresh`** (with the existing cookie-CSRF rules)
+1. Hash the presented token and load its row.
+2. Missing, expired, or revoked token → `401` and clear cookies.
+3. If `replacedById` is already set, treat this as possible token reuse and revoke the entire family.
+4. Otherwise, rotate atomically: revoke the old row, insert the replacement hash in the same family, and issue an access JWT with the current `auth_epoch`.
+
+**`POST /auth/logout`**
+- Revoke the current refresh-token family and clear both cookies. Other devices remain active.
+- The access JWT may remain valid until its expiry (at most 15 minutes in the target design). Do not bump `auth_epoch` for single-device logout.
+
+**Password change, account disable, or logout-all**
+- Increment `auth_epoch` and revoke all refresh-token rows for the user.
+- Existing access JWTs fail on their next `requireAuth` user/version check.
+
+**`requireAuth` target**
+1. Read cookie or Bearer credential.
+2. Verify JWT signature, expiry, issuer, audience, and permitted algorithm.
+3. Load the user by `sub`; reject if absent or JWT `ver !== user.auth_epoch`. If email verification is implemented, also enforce the documented verified-email requirement.
+4. Do not query the `refresh_tokens` table on every ordinary API request.
+
+Do not use a Redis access-JWT `jti` denylist as the main revocation mechanism; it adds operational state and overlaps with short access TTL plus `auth_epoch`. Revisit only if the remaining access-token exposure window is unacceptable.
 
 ---
 
-HSTS preload
+## 5. User deletion and financial retention
 
-Current: production HTTPS responses send
-`Strict-Transport-Security: max-age=15552000; includeSubDomains` (180 days).
-Browsers remember HTTPS-only after they have already visited. `preload` is not
-set, and the domain is not on Chrome’s HSTS preload list.
+**Current database behavior recorded in the transaction design:** foreign keys restrict hard deletion of users with accounts or transactions; email verification tokens cascade with user deletion. There is no user-delete API in v1. See [transaction-design.md](./transaction-design.md) §6.4.
 
-Changes (only when the apex domain is fully HTTPS and you will not need HTTP
-on any subdomain)
-- Raise `max-age` to at least `31536000` (1 year).
-- Add `preload` to the HSTS header in `require-https.ts`.
-- Submit the registrable domain at https://hstspreload.org/.
-- Know that removal is slow (Chrome release cycle). Do not preload staging
-  or a host you might still serve over HTTP.
+**Deferred workflow — product and legal review required**
+- Distinguish account closure/deactivation (including stopping sync) from erasure.
+- Decide whether a data export is required before closure/deletion.
+- Apply retention holds for tax, disputes, or regulatory needs; decide when PII can be anonymized or purged.
+- Use an audited admin/batch workflow if needed. Do not switch financial foreign keys to `ON DELETE CASCADE` as a shortcut.
+
+---
+
+## 6. HSTS preload evaluation
+
+**Current state in notes:** Production sends `Strict-Transport-Security: max-age=15552000; includeSubDomains` (180 days); `preload` is not configured in the application.
+
+**Only proceed after validating the deployment domain and every relevant subdomain**
+- Increase `max-age` to at least `31536000` (one year) if appropriate.
+- Add `preload` to the HSTS header only when the apex domain and every covered subdomain can remain HTTPS-only.
+- Verify current eligibility requirements and operational consequences before submitting at [hstspreload.org](https://hstspreload.org/).
+- Do not preload staging or hosts that still need HTTP; removal can take time to propagate.
