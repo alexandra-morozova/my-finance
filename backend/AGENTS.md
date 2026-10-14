@@ -6,6 +6,16 @@ This directory contains the backend API built with Node.js, Express, TypeScript,
 
 The backend should be maintainable, secure, easy to test, and straightforward to extend.
 
+### Design documents (`docs/`)
+
+- [email-verification-design.md](../docs/email-verification-design.md) — verify-before-sign-in, API contract, security.
+- [email-verification-implementation.md](../docs/email-verification-implementation.md) — step-by-step backlog.
+- [transaction-design.md](../docs/transaction-design.md) — transactions, accounts, idempotent import, sync, semantics.
+- [transaction-implementation.md](../docs/transaction-implementation.md) — phased backlog; **one phase at a time with user confirmation**.
+- [auth-sys-design.md](../docs/auth-sys-design.md) — BFF / session architecture (proposed).
+- [todo-be.md](../docs/todo-be.md) — backend delivery notes.
+- [for-next-version-be.md](../docs/for-next-version-be.md) — deferred production hardening.
+
 ### Core principles
 
 - Prefer simple, explicit code over unnecessary abstractions.

@@ -10,5 +10,5 @@
     "allowImportingTsExtensions": true,
     "types": ["node"]
   },
-  "include": ["src/**/*.ts", "prisma.config.ts", "generated/**/*.ts"]
+  "include": ["src/**/*.ts", "tests/**/*.ts", "prisma.config.ts", "generated/**/*.ts", "vitest.config.ts"]
 }

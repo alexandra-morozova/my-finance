@@ -1,21 +1,56 @@
 generator client {
-  provider = "prisma-client"
-  output   = "../generated/prisma"
+  provider        = "prisma-client"
+  output          = "../generated/prisma"
+  previewFeatures = ["partialIndexes"]
 }
 
 datasource db {
   provider = "postgresql"
 }
 
+enum AccountType {
+  CHECKING
+  SAVINGS
+  CREDIT
+  CASH
+  OTHER
+}
+
+enum AccountSyncStatus {
+  IDLE
+  RUNNING
+  ERROR
+}
+
+enum TransactionStatus {
+  PENDING
+  POSTED
+  VOID
+}
+
+enum TransactionKind {
+  STANDARD
+  REFUND
+  TRANSFER
+}
+
+enum TransactionSource {
+  MANUAL
+  IMPORT
+  SYNC
+}
+
 model User {
-  id                String                     @id @default(uuid()) @db.Uuid
-  email             String                     @unique
-  passwordHash      String                     @map("password_hash")
-  name              String
-  emailVerifiedAt   DateTime?                  @map("email_verified_at") @db.Timestamptz
-  createdAt         DateTime                   @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt         DateTime                   @updatedAt @map("updated_at") @db.Timestamptz
+  id                      String                   @id @default(uuid()) @db.Uuid
+  email                   String                   @unique
+  passwordHash            String                   @map("password_hash")
+  name                    String
+  emailVerifiedAt         DateTime?                @map("email_verified_at") @db.Timestamptz
+  createdAt               DateTime                 @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt               DateTime                 @updatedAt @map("updated_at") @db.Timestamptz
   emailVerificationTokens EmailVerificationToken[]
+  accounts                Account[]
+  transactions            Transaction[]
 
   @@map("users")
 }
@@ -31,4 +66,60 @@ model EmailVerificationToken {
 
   @@index([userId])
   @@map("email_verification_tokens")
+}
+
+model Account {
+  id                String            @id @default(uuid()) @db.Uuid
+  userId            String            @map("user_id") @db.Uuid
+  name              String
+  type              AccountType       @default(CHECKING)
+  currency          String            @db.VarChar(3)
+  externalProvider  String?           @map("external_provider")
+  externalAccountId String?           @map("external_account_id")
+  lastSyncedAt      DateTime?         @map("last_synced_at") @db.Timestamptz
+  syncCursor        String?           @map("sync_cursor")
+  syncStatus        AccountSyncStatus @default(IDLE) @map("sync_status")
+  syncError         String?           @map("sync_error")
+  createdAt         DateTime          @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt         DateTime          @updatedAt @map("updated_at") @db.Timestamptz
+  user              User              @relation(fields: [userId], references: [id], onDelete: Restrict)
+  transactions      Transaction[]
+
+  @@unique([id, userId])
+  // Import idempotency: manual accounts omit external ids (partialIndexes preview).
+  @@unique([userId, externalProvider, externalAccountId], map: "accounts_user_external_account_key", where: raw("external_provider IS NOT NULL AND external_account_id IS NOT NULL"))
+  @@index([userId, name, id])
+  @@map("accounts")
+}
+
+model Transaction {
+  id                   String            @id @default(uuid()) @db.Uuid
+  userId               String            @map("user_id") @db.Uuid
+  accountId            String            @map("account_id") @db.Uuid
+  amount               Decimal           @db.Decimal(19, 4)
+  currency             String            @db.VarChar(3)
+  date                 DateTime          @db.Date
+  status               TransactionStatus @default(POSTED)
+  kind                 TransactionKind   @default(STANDARD)
+  source               TransactionSource @default(MANUAL)
+  memo                 String?
+  externalProvider     String?           @map("external_provider")
+  externalId           String?           @map("external_id")
+  relatedTransactionId String?           @map("related_transaction_id") @db.Uuid
+  transferGroupId      String?           @map("transfer_group_id") @db.Uuid
+  deletedAt            DateTime?         @map("deleted_at") @db.Timestamptz
+  createdAt            DateTime          @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt            DateTime          @updatedAt @map("updated_at") @db.Timestamptz
+  user                 User              @relation(fields: [userId], references: [id], onDelete: Restrict)
+  account              Account           @relation(fields: [accountId, userId], references: [id, userId], onDelete: Restrict)
+  relatedTransaction   Transaction?      @relation("TransactionRefundLink", fields: [relatedTransactionId, userId], references: [id, userId], onDelete: Restrict)
+  refundTransactions   Transaction[]     @relation("TransactionRefundLink")
+
+  @@unique([id, userId])
+  // Import idempotency per account (provider ids unique within a linked account).
+  @@unique([accountId, externalProvider, externalId], map: "transactions_account_external_id_key", where: raw("external_provider IS NOT NULL AND external_id IS NOT NULL"))
+  @@index([userId, date(sort: Desc), id(sort: Desc)], map: "transactions_active_user_date_idx", where: raw("deleted_at IS NULL"))
+  @@index([userId, accountId, date(sort: Desc), id(sort: Desc)])
+  @@index([accountId, status])
+  @@map("transactions")
 }
