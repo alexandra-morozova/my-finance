@@ -5,7 +5,7 @@ alwaysApply: true
 
 # Application structure and layer boundaries
 
-- Organize code by feature under src/modules/.
+- Backend code is organized by feature under `src/modules/`. The frontend SPA follows the layout in `frontend.mdc`.
 - Each feature may contain routes, controllers, services,
   repositories, validation, and types as needed.
 - Routes define HTTP endpoints and middleware.
