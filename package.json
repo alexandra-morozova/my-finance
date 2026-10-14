@@ -1,0 +1,32 @@
+
+{
+  "name": "myfinance",
+  "private": true,
+  "packageManager": "pnpm@12.11.2",
+  "scripts": {
+    "db:up": "docker compose up -d postgres",
+    "db:down": "docker compose stop postgres",
+
+    "migrate": "docker compose --profile migrate run --build --rm migrate",
+    "migrate:prod": "docker compose -f docker-compose.yml -f docker-compose.prod.yml --profile migrate run --build --rm migrate",
+
+    "dev:api": "docker compose --profile api up --build",
+    "dev:stack": "docker compose --profile api --profile dev-ui up --build",
+    "dev:down": "docker compose --profile api --profile dev-ui down",
+    "dev:ps": "docker compose --profile api --profile dev-ui ps",
+    "dev:logs": "docker compose --profile api --profile dev-ui logs --tail=200 -f",
+
+    "prod:up": "docker compose -f docker-compose.yml -f docker-compose.prod.yml --profile api up --build -d",
+    "prod:deploy:local": "docker compose -f docker-compose.yml -f docker-compose.prod.yml --profile migrate run --build --rm migrate && docker compose -f docker-compose.yml -f docker-compose.prod.yml --profile api up --build -d",
+    "prod:down": "docker compose -f docker-compose.yml -f docker-compose.prod.yml --profile api down",
+    "prod:ps": "docker compose -f docker-compose.yml -f docker-compose.prod.yml --profile api ps",
+    "prod:logs": "docker compose -f docker-compose.yml -f docker-compose.prod.yml --profile api logs --tail=200 -f backend",
+
+    "health": "curl -fsS http://127.0.0.1:4000/health",
+
+    "build:backend": "docker compose --profile api build backend",
+    "build:migrate": "docker compose --profile migrate build migrate",
+    "build:backend:prod": "docker compose -f docker-compose.yml -f docker-compose.prod.yml build --no-cache backend migrate",
+    "build:frontend": "docker buildx build -f frontend/Dockerfile --target export --output type=local,dest=./artifacts/frontend ./frontend"
+  }
+}

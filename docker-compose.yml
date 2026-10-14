@@ -1,10 +1,18 @@
+# Local development and optional production-like testing.
+
+# Usage:
+#   docker compose up -d postgres
+#   docker compose --profile migrate run --rm migrate
+#   docker compose --profile api up --build
+#   docker compose --profile api --profile dev-ui up --build
+
 services:
   postgres:
     image: postgres:17
     restart: unless-stopped
     ports:
-      # Host 5433: another local Postgres already binds 5432.
-      - "5433:5432"
+      # Loopback only. Host 5433: another local Postgres may already bind 5432. Not used on AWS.
+      - "127.0.0.1:5433:5432"
     environment:
       POSTGRES_USER: myfinance
       POSTGRES_PASSWORD: myfinance
@@ -17,6 +25,64 @@ services:
       timeout: 5s
       retries: 5
       start_period: 10s
+
+  backend:
+    profiles: ["api"]
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      target: development
+    restart: unless-stopped
+    ports:
+      # Loopback only. On AWS the ALB reaches tasks via security groups.
+      - "127.0.0.1:4000:4000"
+    env_file:
+      - ./backend/.env
+    environment:
+      # Compose DNS name; overrides host-oriented DATABASE_URL from .env.
+      DATABASE_URL: postgres://myfinance:myfinance@postgres:5432/myfinance
+      NODE_ENV: development
+    volumes:
+      - ./backend/src:/app/src
+      - ./backend/prisma:/app/prisma
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # One-off migrations (dedicated `migrate` image target). Not run on container start.
+  migrate:
+    profiles: ["migrate"]
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      target: migrate
+    env_file:
+      - ./backend/.env
+    environment:
+      DATABASE_URL: postgres://myfinance:myfinance@postgres:5432/myfinance
+    healthcheck:
+      disable: true
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  frontend:
+    profiles: ["dev-ui"]
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      target: development
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:5173:5173"
+    environment:
+      API_PROXY_TARGET: http://backend:4000
+    volumes:
+      - ./frontend/src:/app/src
+      - ./frontend/index.html:/app/index.html
+      - ./frontend/public:/app/public
+    depends_on:
+      - backend
 
 volumes:
   postgres_data:

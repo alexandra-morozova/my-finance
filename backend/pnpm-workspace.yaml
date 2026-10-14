@@ -1,4 +1,7 @@
+# Only packages in this lockfile that ship install/preinstall/postinstall scripts.
+# Keep in sync with `pnpm rebuild ...` in backend/Dockerfile deps stage.
+nodeLinker: hoisted
 allowBuilds:
-  '@prisma/client': true
   '@prisma/engines': true
   prisma: true
+  esbuild: true

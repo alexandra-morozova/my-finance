@@ -1,0 +1,42 @@
+services:
+  backend:
+    profiles: ["api"]
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      target: production
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:4000:4000"
+    env_file:
+      - ./backend/.env
+    environment:
+      DATABASE_URL: postgres://myfinance:myfinance@postgres:5432/myfinance
+      NODE_ENV: production
+      # Align public URLs with how you reach the stack from the host browser.
+      BASE_URL: http://localhost:4000
+      FRONTEND_URL: http://localhost:5173
+      JWT_ISSUER: http://localhost:4000
+      JWT_AUDIENCE: http://localhost:5173
+    # No source bind-mounts: exercise the baked image.
+    volumes: !reset []
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # API start only (matches Dockerfile CMD). Migrations use the migrate profile/target.
+
+  migrate:
+    profiles: ["migrate"]
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      target: migrate
+    env_file:
+      - ./backend/.env
+    environment:
+      DATABASE_URL: postgres://myfinance:myfinance@postgres:5432/myfinance
+    healthcheck:
+      disable: true
+    depends_on:
+      postgres:
+        condition: service_healthy
