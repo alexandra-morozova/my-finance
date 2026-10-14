@@ -16,3 +16,8 @@ export async function connectDatabase() {
     process.exit(1);
   }
 }
+
+export async function disconnectDatabase() {
+  await prisma.$disconnect();
+  logger.info("PostgreSQL disconnected");
+}

@@ -9,6 +9,7 @@ import { authRouter } from "./modules/auth/auth.routes.ts";
 import { transactionRouter } from "./modules/transaction/transaction.routes.ts";
 import { usersRouter } from "./modules/users/users.routes.ts";
 import { env } from "./shared/env.ts";
+import { isShuttingDown } from "./shared/shutdown-state.ts";
 
 const app = express();
 
@@ -22,6 +23,10 @@ app.use(cors({ origin: env.FRONTEND_URL, credentials: true }));
 app.use(express.json());
 
 app.get("/health", (_req, res) => {
+  if (isShuttingDown()) {
+    res.status(503).json({ status: "shutting_down" });
+    return;
+  }
   res.json({ status: "ok" });
 });
 
