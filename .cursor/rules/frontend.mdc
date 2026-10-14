@@ -1,0 +1,29 @@
+---
+description: Frontend SPA conventions (Vite, React, Ant Design, SCSS)
+globs: frontend/**
+alwaysApply: false
+---
+
+# Frontend conventions
+
+- Vite + React + TypeScript SPA. Package manager is pnpm.
+- Routing: `react-router`. UI: Ant Design (`antd`). Page styles use SCSS. No Tailwind.
+- Call the API with `fetch` and `credentials: "include"` on Express paths (`/auth`, `/users`, `/health`). Never store access tokens in JavaScript or web storage.
+- Do not put local proxy or `VITE_API_URL` logic in application code. Local forwarding lives only in `vite.config.ts` `server.proxy` (ignored by production builds).
+- Organize the SPA by role: `src/pages` for screens, `src/layouts` for shared page shells, `src/components` for reusable UI (group by area when helpful, e.g. `components/auth/`, `components/routing/`), `src/contexts` for React context providers, `src/hooks` for custom hooks, `src/services` for API calls, `src/types` for shared domain types, `src/styles` for global styles, and `src/assets` for imported images and icons. Do not import Prisma, Express, or backend source from the frontend.
+- Prefer layer folders over `src/features/` unless the team explicitly adopts feature folders. When one product area spans several layers, keep a mental (and documented) **slice map** so new code lands in the right place.
+
+## Auth slice (example cross-layer feature)
+
+| Concern | Location | Examples |
+|--------|----------|----------|
+| Screens | `src/pages/` | `LoginPage`, `RegisterPage` |
+| Auth chrome | `src/layouts/` | `AuthLayout` (+ co-located SCSS) |
+| Session state | `src/contexts/` | `AuthProvider.tsx` + hooks in `auth-context.tsx` (barrel `auth.tsx`) |
+| Domain types | `src/types/` | `User`, `LoginInput`, `RegisterInput` |
+| Auth UI | `src/components/auth/` | `AuthFormFields`; use `AppAlert` for messages |
+| Route access | `src/components/routing/` | `ProtectedRoute`, `GuestRoute` |
+| HTTP | `src/services/` | `auth.ts`, `users.ts` (`/users/me`), shared `api.ts` |
+| App wiring | `src/App.tsx`, `src/router.tsx` | Providers, theme, route tree |
+
+When extending auth: add API functions in `services/`, types in `src/types/`, session behavior in `contexts/`, new authenticated routes under `MainLayout` in `router.tsx`, guards in `components/routing/`, shared auth UI in `components/auth/`, and pages in `pages/`. Run `pnpm test` for pure helpers (`sessionBootstrap`, `navigation`, `api-parse`). Prefer granular hooks (`useAuthReady`, `useAuthUser`, `useAuthSessionError`, `useAuthActions`) so components re-render only when the slice they read changes. Use `useAuthenticatedUser` only under `ProtectedRoute` / `MainLayout`. Do not import `auth-context-store.ts` outside `contexts/`. Avoid `useAuthState` / `useAuth` unless the component truly needs every field. Do not scatter duplicate validation or fetch logic in pages if it belongs in `services/` or shared helpers.

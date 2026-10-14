@@ -3,7 +3,7 @@ import type { Request, Response } from "express";
 import { HTTP_STATUS } from "../shared/utils/http-status.ts";
 
 // In-memory counters: reset on process restart and are not shared across instances.
-// Shared store (Redis) is tracked in for-next-version.
+// Shared store (Redis): see docs/for-next-version-be.md
 
 function tooManyRequests(message: string) {
   return (_req: Request, res: Response) => {
