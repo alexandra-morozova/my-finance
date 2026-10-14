@@ -1,6 +1,10 @@
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import type { Server } from "node:http";
 import { app } from "../../src/app.ts";
+import {
+  markShuttingDown,
+  resetShutdownStateForTests,
+} from "../../src/shared/shutdown-state.ts";
 
 describe("GET /health", () => {
   let server: Server;
@@ -24,9 +28,20 @@ describe("GET /health", () => {
     });
   });
 
+  afterEach(() => {
+    resetShutdownStateForTests();
+  });
+
   it("returns HTTP 200 with status ok", async () => {
     const response = await fetch(`${baseUrl}/health`);
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ status: "ok" });
+  });
+
+  it("returns HTTP 503 while shutting down", async () => {
+    markShuttingDown();
+    const response = await fetch(`${baseUrl}/health`);
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({ status: "shutting_down" });
   });
 });

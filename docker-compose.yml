@@ -32,6 +32,7 @@ services:
       context: ./backend
       dockerfile: Dockerfile
       target: development
+    stop_grace_period: 35s
     restart: unless-stopped
     ports:
       # Loopback only. On AWS the ALB reaches tasks via security groups.

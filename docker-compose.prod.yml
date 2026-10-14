@@ -5,6 +5,7 @@ services:
       context: ./backend
       dockerfile: Dockerfile
       target: production
+    stop_grace_period: 35s
     restart: unless-stopped
     ports:
       - "127.0.0.1:4000:4000"
