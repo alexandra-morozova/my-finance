@@ -1,0 +1,252 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: "22"
+  PNPM_VERSION: "12.11.2"
+
+jobs:
+  backend:
+    name: Backend
+    timeout-minutes: 15
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: myfinance
+          POSTGRES_PASSWORD: myfinance
+          POSTGRES_DB: myfinance
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U myfinance -d myfinance"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgres://myfinance:myfinance@localhost:5432/myfinance
+      PORT: "4000"
+      BASE_URL: http://localhost:4000
+      NODE_ENV: test
+      JWT_SECRET: ci-jwt-secret
+      JWT_EXPIRES_IN: 1h
+      JWT_ISSUER: http://localhost:4000
+      JWT_AUDIENCE: http://localhost:5173
+      JWT_REFRESH_SECRET: ci-jwt-refresh-secret
+      JWT_REFRESH_EXPIRES_IN: 7d
+      GEMINI_API_KEY: ci-gemini-placeholder
+      CRON_SECRET: ci-cron-secret
+      FRONTEND_URL: http://localhost:5173
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/setup@v3
+        with:
+          version: ${{ env.PNPM_VERSION }}
+          runtime: node@${{ env.NODE_VERSION }}
+          working-directory: backend
+          cache: true
+          cache-dependency-path: backend/pnpm-lock.yaml
+          install: false
+
+      - name: Prepare local env file for test script
+        run: cp .env.example .env
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Validate Prisma schema
+        run: pnpm exec prisma validate
+
+      - name: Generate Prisma Client
+        run: pnpm exec prisma generate
+
+      - name: Apply migrations
+        run: pnpm exec prisma migrate deploy
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Test
+        run: pnpm test
+
+  frontend:
+    name: Frontend
+    timeout-minutes: 15
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/setup@v3
+        with:
+          version: ${{ env.PNPM_VERSION }}
+          runtime: node@${{ env.NODE_VERSION }}
+          working-directory: frontend
+          cache: true
+          cache-dependency-path: frontend/pnpm-lock.yaml
+          install: false
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Test
+        run: pnpm test
+
+      - name: Build
+        run: pnpm build
+
+  docker:
+    name: Docker images
+    timeout-minutes: 20
+    runs-on: ubuntu-latest
+    env:
+      CI_IMAGE_API: myfinance-backend:ci
+      CI_IMAGE_MIGRATE: myfinance-migrate:ci
+      DATABASE_URL: postgres://myfinance:myfinance@ci-postgres:5432/myfinance
+      PORT: "4000"
+      BASE_URL: http://127.0.0.1:4000
+      NODE_ENV: production
+      JWT_SECRET: ci-jwt-secret
+      JWT_EXPIRES_IN: 1h
+      JWT_ISSUER: http://127.0.0.1:4000
+      JWT_AUDIENCE: http://127.0.0.1:5173
+      JWT_REFRESH_SECRET: ci-jwt-refresh-secret
+      JWT_REFRESH_EXPIRES_IN: 7d
+      GEMINI_API_KEY: ci-gemini-placeholder
+      CRON_SECRET: ci-cron-secret
+      FRONTEND_URL: http://127.0.0.1:5173
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: docker/setup-buildx-action@v4
+
+      - name: Build backend production image
+        run: |
+          docker buildx build --load \
+            -t "$CI_IMAGE_API" \
+            -f backend/Dockerfile \
+            --target production \
+            backend
+
+      - name: Build backend migrate image
+        run: |
+          docker buildx build --load \
+            -t "$CI_IMAGE_MIGRATE" \
+            -f backend/Dockerfile \
+            --target migrate \
+            backend
+
+      - name: Smoke test production API image
+        run: |
+          set -euo pipefail
+
+          cleanup() {
+            docker rm -f ci-api ci-postgres >/dev/null 2>&1 || true
+            docker network rm ci-net >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+
+          docker network create ci-net
+
+          docker run -d --name ci-postgres --network ci-net \
+            -e POSTGRES_USER=myfinance \
+            -e POSTGRES_PASSWORD=myfinance \
+            -e POSTGRES_DB=myfinance \
+            postgres:17
+
+          echo "Waiting for PostgreSQL..."
+          for i in $(seq 1 30); do
+            if docker exec ci-postgres pg_isready -U myfinance -d myfinance >/dev/null 2>&1; then
+              echo "PostgreSQL is ready"
+              break
+            fi
+            if [ "$i" -eq 30 ]; then
+              echo "PostgreSQL did not become ready in time" >&2
+              docker logs ci-postgres >&2 || true
+              exit 1
+            fi
+            sleep 2
+          done
+
+          echo "Applying migrations..."
+          docker run --rm --network ci-net \
+            -e DATABASE_URL="$DATABASE_URL" \
+            "$CI_IMAGE_MIGRATE"
+
+          echo "Starting API container..."
+          docker run -d --name ci-api --network ci-net \
+            -p "127.0.0.1:${PORT}:${PORT}" \
+            -e DATABASE_URL="$DATABASE_URL" \
+            -e PORT="$PORT" \
+            -e BASE_URL="$BASE_URL" \
+            -e NODE_ENV="$NODE_ENV" \
+            -e JWT_SECRET="$JWT_SECRET" \
+            -e JWT_EXPIRES_IN="$JWT_EXPIRES_IN" \
+            -e JWT_ISSUER="$JWT_ISSUER" \
+            -e JWT_AUDIENCE="$JWT_AUDIENCE" \
+            -e JWT_REFRESH_SECRET="$JWT_REFRESH_SECRET" \
+            -e JWT_REFRESH_EXPIRES_IN="$JWT_REFRESH_EXPIRES_IN" \
+            -e GEMINI_API_KEY="$GEMINI_API_KEY" \
+            -e CRON_SECRET="$CRON_SECRET" \
+            -e FRONTEND_URL="$FRONTEND_URL" \
+            "$CI_IMAGE_API"
+
+          echo "Waiting for GET /health..."
+          for i in $(seq 1 30); do
+            if curl -fsS "http://127.0.0.1:${PORT}/health"; then
+              echo
+              echo "Health check passed"
+              exit 0
+            fi
+            if ! docker ps --format '{{.Names}}' | grep -qx ci-api; then
+              echo "API container exited before becoming healthy" >&2
+              docker logs ci-api >&2 || true
+              exit 1
+            fi
+            if [ "$i" -eq 30 ]; then
+              echo "API did not become healthy in time" >&2
+              docker logs ci-api >&2 || true
+              exit 1
+            fi
+            sleep 2
+          done
+
+      - name: Build and export frontend
+        run: |
+          mkdir -p artifacts/frontend
+
+          docker buildx build \
+            -f frontend/Dockerfile \
+            --target export \
+            --output type=local,dest=./artifacts/frontend \
+            ./frontend
+
+          test -s ./artifacts/frontend/dist/index.html

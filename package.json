@@ -27,6 +27,6 @@
     "build:backend": "docker compose --profile api build backend",
     "build:migrate": "docker compose --profile migrate build migrate",
     "build:backend:prod": "docker compose -f docker-compose.yml -f docker-compose.prod.yml build --no-cache backend migrate",
-    "build:frontend": "docker buildx build -f frontend/Dockerfile --target export --output type=local,dest=./artifacts/frontend ./frontend"
+    "build:frontend": "docker buildx build -f frontend/Dockerfile --target export ./frontend"
   }
 }
