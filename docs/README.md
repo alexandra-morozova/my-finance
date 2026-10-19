@@ -13,6 +13,7 @@ Status below reflects the uploaded implementation tracker as of **14 October 202
 | Transaction read API | Implemented per tracker | [Transaction design](./transaction-design.md), [backlog](./transaction-implementation.md), Phase 2 | Phase 3 awaits explicit user confirmation |
 | Transaction writes, transfer, refund | Planned | [Transaction implementation backlog](./transaction-implementation.md), Phase 3 | Await confirmation before starting |
 | Transaction import / bank sync | Planned | [Transaction implementation backlog](./transaction-implementation.md), Phases 4 and 7 | Import precedes sync |
+| File upload + AI enrichment | Proposed plan | [Transaction import + AI plan](./transaction-import-ai-implementation.md) | Start with mock storage and presigned-URL contract; add S3 adapter in Stage 2 |
 | Email verification | Not implemented; previous attempt reverted | [Email verification design](./email-verification-design.md), [backlog](./email-verification-implementation.md) | Resume from the backlog; resolve delivery policy first |
 | Near-term auth/backend hardening | Deferred backlog | [Backend next-version work](./for-next-version-be.md) | Prioritize and implement in small slices |
 | OIDC/BFF high-availability session architecture | Proposal; not approved for current v1 | [Auth system design](./auth-sys-design.md) | Make an architecture decision before implementation |
@@ -23,6 +24,7 @@ Status below reflects the uploaded implementation tracker as of **14 October 202
 1. [Backend delivery status and notes](./todo-be.md) — current implementation snapshot.
 2. [Transaction design](./transaction-design.md) — approved domain rules for accounts, transactions, import identity, ownership, pagination, and sync.
 3. [Transaction implementation backlog](./transaction-implementation.md) — completed phases, current phase, and confirmation gates.
+4. [Transaction import + AI implementation plan](./transaction-import-ai-implementation.md) — upload intents, mock storage, S3 presigned URLs, CSV preview, review, and AI enrichment.
 4. [Email verification design](./email-verification-design.md), then [implementation backlog](./email-verification-implementation.md) — planned verify-before-sign-in feature.
 5. [Deferred backend hardening](./for-next-version-be.md) — logging, shared rate limits, audit events, refresh tokens, retention, and HSTS considerations.
 6. [Resilient banking authentication design](./auth-sys-design.md) — separate future-state OIDC/BFF proposal; do not treat it as approved or combine it with the JWT refresh plan without a decision.
@@ -34,6 +36,7 @@ Status below reflects the uploaded implementation tracker as of **14 October 202
 | [todo-be.md](./todo-be.md) | Current backend implementation summary and deferred work | Status snapshot; reconcile with code before release |
 | [transaction-design.md](./transaction-design.md) | Domain semantics, constraints, security, read performance, import and sync architecture | Approved for phased implementation |
 | [transaction-implementation.md](./transaction-implementation.md) | Phase-by-phase implementation checklist | Phases 0–2 complete per tracker; Phase 3 next |
+| [transaction-import-ai-implementation.md](./transaction-import-ai-implementation.md) | Design and staged checklist for file import, mock/S3 object storage, presigned URLs, CSV parsing, and AI enrichment | Proposed; not implemented |
 | [email-verification-design.md](./email-verification-design.md) | Product/API/security design for email ownership verification | Proposed; not implemented |
 | [email-verification-implementation.md](./email-verification-implementation.md) | Concrete task checklist for resuming email verification | Not implemented; previous attempt reverted |
 | [for-next-version-be.md](./for-next-version-be.md) | Deferred production hardening for the current Express/JWT stack | Backlog; prioritize before multi-instance production |
