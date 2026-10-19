@@ -81,7 +81,41 @@ Introduce a TransactionImport record (and status enum) through a Prisma migratio
 
 Add user/account relations and indexes appropriate for listing a user's imports by date/status. Enforce account/import ownership at the service layer and prefer composite ownership constraints where compatible with the existing schema conventions. Do not store a presigned URL in PostgreSQL. Consider cleanup of abandoned AWAITING_UPLOAD rows and objects after expiry.
 
-## 7. API proposal
+## 7. Metadata management and provenance
+
+Metadata is a first-class part of the design, not incidental fields passed between services. It supports authorization, discovery, processing decisions, reproducibility, auditability, lifecycle cleanup and operations.
+
+### Metadata categories and source of truth
+
+| Category | Examples | Canonical storage |
+|---|---|---|
+| Business / ownership | Import ID, user ID, account ID, original filename (display-only), uploader, created time, source/type | PostgreSQL |
+| Declared upload metadata | Declared content type, declared size, optional expected checksum | PostgreSQL; explicitly treated as untrusted client claims |
+| Verified storage metadata | Internal storage key, provider, verified content type and size, checksum where supported, ETag, S3 VersionId, verified time | PostgreSQL records verified values; object bytes and versions remain in S3 |
+| Processing metadata | Status, stage, attempt count, started/finished times, safe error code, parser/OCR/pipeline version, page count and extraction quality indicators | PostgreSQL |
+| Derived artifact metadata | Extracted-content artifact key/version/checksum, format/schema version, source document version | PostgreSQL references; large artifact bytes in S3 only when appropriate |
+| AI provenance | Provider/model version, prompt version, output schema version, evaluation/config version, request correlation ID, token/cost metrics where available | PostgreSQL or a dedicated processing-run record |
+| Finding and review metadata | Rule/model origin, evidence page/cell/coordinates, source version, reviewer decision, reviewer ID and timestamps | PostgreSQL; preserve review events where history matters |
+| Lifecycle / governance | Retention class, expiry time, deletion requested/completed timestamps, access/audit events | PostgreSQL and operational audit logs, according to retention policy |
+
+### Metadata principles
+
+- **PostgreSQL is the application's source of truth** for ownership, workflow status, relationships, review decisions and queryable metadata. S3 user metadata/tags can support storage operations and lifecycle policies, but must not be the sole copy of business state.
+- **Distinguish declared from verified values.** The browser may declare filename, MIME type, size or checksum, but completion logic must validate what can be verified from S3 and content inspection. Store both declared and verified values when the distinction matters.
+- **Pin the object version.** Store the S3 VersionId observed at completion and ensure every parser/worker reads that exact version. Persist checksum information when available. ETag may be retained as a storage validator but must not be treated as a universal content hash.
+- **Do not persist or log presigned URLs.** They are temporary bearer capabilities. Persist the object key and version metadata only; sign a fresh URL after authorization when needed.
+- **Separate immutable source facts from mutable workflow state.** Original filename/type/declared size and verified object identity describe the uploaded artifact; status, attempt count and timestamps change as the workflow progresses. Review decisions and prior analysis runs must not be silently overwritten by a new parser/model run.
+- **Version the derived results.** Associate extracted blocks, findings and evaluation data with the source object version, extractor/pipeline version and AI model/prompt/schema versions needed to understand or reproduce them.
+- **Store only what the product needs.** Use typed relational columns for values used in authorization, filtering, joins, retention, uniqueness or operational dashboards. Use JSON for evolving, non-authoritative diagnostics where appropriate, with schema/versioning and size limits. Do not dump full raw documents or model prompts/responses into general-purpose metadata columns or logs.
+- **Index query patterns, not every field.** Likely starting indexes include (user ID, created time), (user ID, status, created time) and a processing-job/status index if needed. Validate these against actual queries and avoid indexing large text or high-cardinality diagnostic JSON without a measured need.
+- **Keep metadata bounded and privacy-aware.** Normalize filenames for display, cap metadata lengths, avoid sensitive content in logs, and define which metadata survives document deletion for audit/legal reasons.
+
+### Minimum metadata for the first upload milestone
+
+At minimum, persist: import ID, user/account ownership, declared filename/content type/size, server-generated object key, import status, created/expiry times, and—after server-side completion verification—verified size/type/checksum if available, ETag, S3 VersionId and verification time. Do not persist the upload/download URL itself.
+
+
+## 8. API proposal
 
 All import routes require authentication. The actual S3 URLs are bearer capabilities, short-lived and returned only after the API has checked user/account authorization. There are no application routes for serving object bytes.
 
@@ -94,7 +128,7 @@ All import routes require authentication. The actual S3 URLs are bearer capabili
 
 Use existing validation, requireAuth, CSRF and error-handler conventions. Do not return storage credentials or raw provider errors. The complete endpoint must not accept a storage key, user ID or version ID from the client as authoritative values.
 
-## 8. Implementation stages
+## 9. Implementation stages
 
 The existing transaction backlog is phase-gated: Phase 3 manual transaction lifecycle is marked as the prerequisite before Phase 4 import. Preserve that ordering unless the product owner explicitly reprioritizes it. This plan describes the import feature stages, not permission to skip existing phase gates.
 
@@ -150,7 +184,7 @@ The existing transaction backlog is phase-gated: Phase 3 manual transaction life
 
 **Exit criteria:** Document lifecycle and failures are observable and recoverable; access and data-retention policies are explicit.
 
-## 9. Conflict resolution and concurrency policy
+## 10. Conflict resolution and concurrency policy
 
 Retries and idempotency are necessary but do not by themselves define which result wins when two operations race. Resolve each conflict type deliberately.
 
@@ -179,7 +213,7 @@ Retries and idempotency are necessary but do not by themselves define which resu
 
 For read replicas, initially use primary for all writes and transaction-scoped consistency-sensitive reads. Add replicas only when measurements show read capacity is a bottleneck; monitor lag and define the maximum staleness acceptable for each read path.
 
-## 9. Required tests and security invariants
+## 11. Required tests and security invariants
 
 - User A cannot create an upload intent for User B's account, complete/read/download User B's import, or use an ID to learn whether another user's object exists.
 - A client cannot choose or overwrite an arbitrary storage key.
@@ -191,7 +225,7 @@ For read replicas, initially use primary for all writes and transaction-scoped c
 - AI output cannot modify transaction amounts, currency, account IDs, import status or idempotency identifiers.
 - Original documents are private; no public bucket/object ACL is used.
 
-## 11. Out of scope for initial implementation
+## 12. Out of scope for initial implementation
 
 - PDF OCR and bank-statement layouts beyond CSV.
 - Automatic bank API synchronization (already planned separately in transaction Phase 7).
