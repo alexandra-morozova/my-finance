@@ -12,9 +12,9 @@ Extend MyFinance with a safe upload-and-review workflow for bank transaction sta
 
 ## 2. Key decisions
 
-1. **Object storage is behind an injected ObjectStorage interface.** The import service must not import AWS SDK classes or know whether the implementation is mock or S3.
-2. **Stage 1 uses a development/test mock.** No AWS credentials or real bucket are required to build and test the end-to-end upload flow. The mock returns presigned-URL-shaped upload/download URLs and stores objects in memory for local single-process use. A development-only mock storage route consumes those URLs; it must never be registered in production. The mock is not durable and is not a production fallback.
-3. **Stage 2 adds the real Amazon S3 adapter.** It uses AWS SDK v3 and actual presigned URLs. The browser sends bytes directly to S3; the API handles authorization, upload intents, completion verification and metadata only.
+1. **Object storage is behind an injected ObjectStorage interface.** The import service must not import AWS SDK classes or know how URLs, streams, or object metadata are implemented.
+2. **Stage 1 includes the real Amazon S3 adapter and presigned URLs.** Use AWS SDK v3 to create signed PUT/GET URLs. The browser sends file bytes directly to S3; the API handles authorization, upload intents, completion verification and metadata only.
+3. **Mock the storage dependency in Stage 1 tests.** Unit and API tests inject a MockObjectStorage / fake implementation so they run without AWS credentials or a live bucket. It implements the same interface and records objects/requests in memory. Do not add a pretend S3 HTTP endpoint to the application. Real S3 behavior is covered by adapter tests with a mocked AWS SDK client plus an optional opt-in integration test against a dedicated test bucket.
 4. **The API never accepts an arbitrary object key from the client.** It generates a random import ID and server-owned key such as users/{userId}/transaction-imports/{importId}/source.csv. Do not use the original filename as a storage key.
 5. **Presigned URLs are bearer capabilities.** Keep their TTL short, do not store them in the database, and do not log them. A presigned S3 URL may be reused until it expires; an upload-completion endpoint must therefore be idempotent. Enable S3 bucket versioning and persist the completed object version ID so processing can read the exact version that was verified.
 6. **Verify upload completion server-side.** Do not trust client claims that an upload succeeded. Use HeadObject (S3) or the mock equivalent to verify existence, content type, expected size and checksum where configured before marking an import uploaded.
@@ -46,24 +46,20 @@ Keep this small and tied to current use cases. Example conceptual contract (adap
 
 Use a TypeScript interface and inject an implementation into the service/composition root. Do not add a generic storage framework or unrelated abstractions.
 
-### Stage 1 mock behavior
+### Stage 1 test double
 
-- Implement MockObjectStorage as a testable adapter; mock object contents live in memory for the single-process local development flow.
-- Issued URLs contain opaque high-entropy tokens mapped server-side to one object key, allowed method, expected content type, and expiration.
-- The mock-only PUT/download handlers must validate token, method, expiry and signed headers. Return S3-like status behavior where useful.
-- Mount mock URL handlers only when NODE_ENV is not production and FILE_STORAGE_PROVIDER=mock; application startup must reject mock storage in production.
-- Tests should also be able to inject the adapter directly, without HTTP, to isolate service behavior.
-- Clearly document that mock objects disappear when the process restarts and that this is only for learning/local development.
+- Implement MockObjectStorage for tests only. Mock object contents and metadata live in memory and can be inspected/reset between tests.
+- MockObjectStorage must implement the same contract as S3ObjectStorage, including presign results, HEAD verification, stream reads and deletion.
+- API/service tests inject the mock; they must not need AWS credentials or send file bytes through a new mock HTTP endpoint.
+- A presigned URL returned by the fake is a harmless deterministic test URL; only the real adapter emits AWS S3 URLs.
 
-The mock URL route intentionally emulates a storage URL; it sends bytes through the local backend and does **not** claim to be direct-to-S3. The real S3 adapter in Stage 2 is the direct-upload implementation.
-
-## 5. S3 adapter and configuration (Stage 2)
+## 5. S3 adapter and configuration (Stage 1)
 
 Add only the AWS SDK v3 packages needed, expected to include @aws-sdk/client-s3 and @aws-sdk/s3-request-presigner. Use PutObjectCommand, GetObjectCommand, HeadObjectCommand, and DeleteObjectCommand as required. Sign uploads with the expected content type (and checksum header when used) so the browser must send matching headers.
 
 Configuration to add to centralized backend environment validation and .env.example:
 
-- FILE_STORAGE_PROVIDER=mock|s3 (mock for local/test by default; reject mock in production).
+- FILE_STORAGE_PROVIDER=s3 (runtime provider). Tests inject MockObjectStorage directly rather than enabling a fake provider in the runtime configuration.
 - AWS_REGION.
 - S3_BUCKET.
 - PRESIGNED_UPLOAD_TTL_SECONDS (short, configurable; default 300 seconds).
@@ -87,7 +83,7 @@ Add user/account relations and indexes appropriate for listing a user's imports 
 
 ## 7. API proposal
 
-All routes require authentication except the development-only mock URL handlers, which are gated by environment and use an unguessable expiring token as a bearer capability.
+All import routes require authentication. The actual S3 URLs are bearer capabilities, short-lived and returned only after the API has checked user/account authorization. There are no application routes for serving object bytes.
 
 | Method | Path | Purpose |
 |---|---|---|
@@ -95,7 +91,6 @@ All routes require authentication except the development-only mock URL handlers,
 | POST | /transaction-imports/:id/complete | Verify uploaded object and transition idempotently to UPLOADED. |
 | GET | /transaction-imports/:id | Return the caller's import status and safe metadata. |
 | GET | /transaction-imports/:id/download-url | Authorize owner, then return a short-lived GET URL. |
-| PUT/GET | /__mock-storage/... | Local-only mock URL target; never register in production. |
 
 Use existing validation, requireAuth, CSRF and error-handler conventions. Do not return storage credentials or raw provider errors. The complete endpoint must not accept a storage key, user ID or version ID from the client as authoritative values.
 
@@ -103,29 +98,20 @@ Use existing validation, requireAuth, CSRF and error-handler conventions. Do not
 
 The existing transaction backlog is phase-gated: Phase 3 manual transaction lifecycle is marked as the prerequisite before Phase 4 import. Preserve that ordering unless the product owner explicitly reprioritizes it. This plan describes the import feature stages, not permission to skip existing phase gates.
 
-### Stage 1 — Contract + mock storage
+### Stage 1 — S3 storage contract + presigned upload APIs
 
-- [ ] Add storage interface and inject it into transaction-import service.
-- [ ] Implement mock URL issuance, expiry, upload/download handling and head/read/delete behavior.
+- [ ] Add ObjectStorage interface and inject it into the transaction-import service.
+- [ ] Implement S3ObjectStorage with presigned PUT/GET, HEAD verification, stream reads, version-aware reads and cleanup using AWS SDK v3.
+- [ ] Implement MockObjectStorage as a test double; inject it into service and API tests (no fake public HTTP storage endpoint).
+- [ ] Add validated S3 configuration and update .env.example. Use the AWS default credential chain / workload IAM role in deployed environments.
 - [ ] Add upload-intent/completion/status API with strict ownership checks and a minimal Prisma migration for import sessions.
-- [ ] Add tests for valid/expired/invalid mock URLs, required headers, ownership/IDOR, oversized/mismatched upload, missing object, duplicate completion and no token leaks.
-- [ ] Demonstrate a complete browser → mock upload URL → completion flow without AWS credentials.
-- [ ] Document that local mock is volatile and development-only.
-
-**Exit criteria:** End-to-end upload contract works with mock storage; tests pass; no real S3 setup required.
-
-### Stage 2 — Real S3 adapter
-
-- [ ] Implement S3 presigned PUT/GET, HEAD verification, stream reads and cleanup using AWS SDK v3.
-- [ ] Add validated configuration and update .env.example.
+- [ ] Add tests for presign parameters/TTL, required content type, ownership/IDOR, metadata mismatch, missing object, duplicate completion and no URL/token leaks.
+- [ ] Add an opt-in S3 integration test using a dedicated test bucket; keep it disabled by default in normal CI.
 - [ ] Verify bucket CORS/IAM/versioning/encryption setup in infrastructure documentation.
-- [ ] Add adapter tests with a mocked S3 client and a separate opt-in integration test against a test bucket (never against production).
-- [ ] Verify direct browser PUT works, completion captures the exact object version and the worker reads that version.
-- [ ] Ensure production cannot start with mock storage selected.
 
-**Exit criteria:** Same application services pass against mock and S3 adapters; no AWS credentials reach the browser.
+**Exit criteria:** API contract and S3 adapter are implemented; ordinary tests run with the mock dependency and no AWS credentials; browser uploads directly to S3 when running with S3 configuration.
 
-### Stage 3 — Parse and preview CSV
+### Stage 2 — Parse and preview CSV
 
 - [ ] Define allowed CSV encoding/delimiter/column mapping policy; stream large inputs and cap rows/bytes.
 - [ ] Parse rows to validated transaction DTOs; preserve row numbers and original column values for error feedback.
@@ -135,7 +121,7 @@ The existing transaction backlog is phase-gated: Phase 3 manual transaction life
 
 **Exit criteria:** User can upload a CSV and receive a deterministic preview with row-level errors.
 
-### Stage 4 — Review and commit
+### Stage 3 — Review and commit
 
 - [ ] Add React upload progress and preview/error table.
 - [ ] Require explicit user confirmation before committing.
@@ -144,7 +130,7 @@ The existing transaction backlog is phase-gated: Phase 3 manual transaction life
 
 **Exit criteria:** Accepted rows create at most one transaction per account/provider/external ID; rejected rows do not get committed.
 
-### Stage 5 — AI enrichment
+### Stage 4 — AI enrichment
 
 - [ ] Add an AIAnalyzer abstraction separate from storage and core import logic.
 - [ ] Initially suggest merchant normalization and transaction category; do not let AI set amount, currency, account ownership or transaction identity.
@@ -154,7 +140,7 @@ The existing transaction backlog is phase-gated: Phase 3 manual transaction life
 
 **Exit criteria:** AI suggestions are schema-valid, evidence-backed where applicable, measurable and explicitly reviewed by the user.
 
-### Stage 6 — Production hardening
+### Stage 5 — Production hardening
 
 - [ ] Apply rate limits and upload-intent quotas; cap file size and processing time.
 - [ ] Add cleanup for abandoned uploads, safe retries and durable processing jobs.
@@ -171,7 +157,7 @@ The existing transaction backlog is phase-gated: Phase 3 manual transaction life
 - Presigned URLs expire; URLs are never persisted or logged.
 - Upload completion verifies object metadata from storage and is idempotent; a client success claim alone cannot advance state.
 - Processing reads the verified S3 version, not whichever object currently happens to be at the key.
-- Mock storage is unavailable in production.
+- Tests use MockObjectStorage only as an injected dependency; no fake object-serving route is deployed.
 - Unsupported/mislabelled files, excessive sizes, malformed content, stale imports and failed storage calls return safe errors.
 - AI output cannot modify transaction amounts, currency, account IDs, import status or idempotency identifiers.
 - Original documents are private; no public bucket/object ACL is used.
