@@ -150,6 +150,35 @@ The existing transaction backlog is phase-gated: Phase 3 manual transaction life
 
 **Exit criteria:** Document lifecycle and failures are observable and recoverable; access and data-retention policies are explicit.
 
+## 9. Conflict resolution and concurrency policy
+
+Retries and idempotency are necessary but do not by themselves define which result wins when two operations race. Resolve each conflict type deliberately.
+
+### Conflict policy by scenario
+
+| Scenario | Policy | Why |
+|---|---|---|
+| Two workers process the same import | Use guarded state transitions / a lease or claim, plus unique constraints for durable side effects. Workers must be idempotent. | At-least-once execution must not create duplicate transactions or conflicting previews. |
+| Two requests complete the same upload | Treat completion as an idempotent state transition. The first verified transition to UPLOADED wins; repeats return the stored state. Reject completion after expiry or after a disallowed terminal state. | Browser retries and concurrent requests are normal. |
+| Presigned URL is reused to upload different bytes | Use a unique, server-generated object key for each upload intent; enable S3 versioning and pin the exact verified VersionId when processing. Never process an unversioned “latest” object after completion. | S3 presigned URLs may be reused before expiry and PUT to an existing key can replace it. Version pinning stops a later overwrite from silently changing the bytes being processed. |
+| Same bank transaction appears in overlapping imports | Let the database unique constraint on (accountId, externalProvider, externalId) arbitrate; use atomic upsert. Do not rely on check-then-insert. | Concurrent imports can race; the database is the final authority for uniqueness. |
+| Imported provider data conflicts with user edits | Define field ownership. Provider/source fields (e.g. posted amount/date/status) may be refreshed from the source; user-owned enrichment (e.g. custom category or user memo) should be preserved unless the user explicitly resets it. | A sync should not silently destroy user-authored metadata. Document the field-by-field policy. |
+| User edits the same record concurrently | For mutable records with a real concurrent-edit use case, use optimistic concurrency (version or updatedAt token). Update only if the token still matches; otherwise return HTTP 409 and let the client reload/reconcile. Use a DB transaction or constraint for invariants that span multiple rows. | Prevents silent lost updates without locking every edit. Do not add version columns everywhere without a concrete requirement. |
+| AI analysis finishes after a reviewer changes a finding | Bind every result to a document version and analyzer/prompt version. Store AI suggestions separately from human review. If the source version changed, mark the result stale and rerun; never overwrite a newer human decision with an older AI response. | Human decisions and model suggestions have different authority. |
+| A read is routed to a lagging replica after a write | Keep one authoritative writer. Route writes and consistency-sensitive/read-after-write queries to the primary; send only stale-tolerant queries to replicas. Define fallback when a replica is unhealthy or lag exceeds the product's tolerance. | Asynchronous replication may not make a committed write immediately visible on a replica. |
+| Primary database fails over | Follow the managed database's single-writer failover/fencing behavior; ensure the old primary cannot continue accepting writes, refresh connection pools and expect bounded write unavailability. | Avoid split-brain writes and divergent histories. Read replicas are not multi-writer conflict resolution. |
+
+### Conflict resolution principles
+
+- **Prefer prevention for invariant violations.** Enforce uniqueness, foreign keys, and transactional invariants in PostgreSQL rather than trying to merge invalid states after the fact.
+- **Use last-write-wins only when it is an explicit product decision.** It is inappropriate for financial amounts, transaction identity, or reviewer decisions where silently losing an update is unacceptable.
+- **Use field-specific ownership rules for imports.** External bank facts and user-authored metadata have different sources of truth; do not apply a blanket “replace every field” upsert.
+- **Preserve history for consequential changes.** Keep the original imported source and version, extraction/AI result versions, and reviewer events so a conflict can be understood later.
+- **Return actionable conflicts.** Use a clear 409 response for stale edits or invalid concurrent state transitions where clients can reload or ask the user to reconcile. Retry automatically only when the operation is safe and the conflict policy is deterministic.
+- **Do not build active-active multi-writer replication for this project by default.** With PostgreSQL primary/read replicas, writes are centralized. Consider multi-writer conflict-free data types or domain merge semantics only if multi-region writes become a true requirement.
+
+For read replicas, initially use primary for all writes and transaction-scoped consistency-sensitive reads. Add replicas only when measurements show read capacity is a bottleneck; monitor lag and define the maximum staleness acceptable for each read path.
+
 ## 9. Required tests and security invariants
 
 - User A cannot create an upload intent for User B's account, complete/read/download User B's import, or use an ID to learn whether another user's object exists.
@@ -162,7 +191,7 @@ The existing transaction backlog is phase-gated: Phase 3 manual transaction life
 - AI output cannot modify transaction amounts, currency, account IDs, import status or idempotency identifiers.
 - Original documents are private; no public bucket/object ACL is used.
 
-## 10. Out of scope for initial implementation
+## 11. Out of scope for initial implementation
 
 - PDF OCR and bank-statement layouts beyond CSV.
 - Automatic bank API synchronization (already planned separately in transaction Phase 7).
